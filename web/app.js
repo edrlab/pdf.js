@@ -74,8 +74,8 @@ import { PDFThumbnailViewer } from "./pdf_thumbnail_viewer.js";
 import { PDFViewer } from "./pdf_viewer.js";
 import { SecondaryToolbar } from "./secondary_toolbar.js";
 import { Toolbar } from "./toolbar.js";
-import { viewerCompatibilityParams } from "./viewer_compatibility.js";
 import { ViewHistory } from "./view_history.js";
+// import { viewerCompatibilityParams } from "./viewer_compatibility.js";
 
 const DEFAULT_SCALE_DELTA = 1.1;
 const DISABLE_AUTO_FETCH_LOADING_BAR_TIMEOUT = 5000; // ms
@@ -2764,57 +2764,58 @@ function webViewerHashchange(evt) {
   }
 }
 
-let webViewerFileInputChange, webViewerOpenFile;
-if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-  webViewerFileInputChange = function (evt) {
-    if (
-      PDFViewerApplication.pdfViewer &&
-      PDFViewerApplication.pdfViewer.isInPresentationMode
-    ) {
-      return; // Opening a new PDF file isn't supported in Presentation Mode.
-    }
-    const file = evt.fileInput.files[0];
+// let webViewerFileInputChange, webViewerOpenFile;
+// if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+//   webViewerFileInputChange = function (evt) {
+//     if (
+//       PDFViewerApplication.pdfViewer &&
+//       PDFViewerApplication.pdfViewer.isInPresentationMode
+//     ) {
+//       return; // Opening a new PDF file isn't supported in Presentation Mode.
+//     }
+//     const file = evt.fileInput.files[0];
 
-    if (!viewerCompatibilityParams.disableCreateObjectURL) {
-      let url = URL.createObjectURL(file);
-      if (file.name) {
-        url = { url, originalUrl: file.name };
-      }
-      PDFViewerApplication.open(url);
-    } else {
-      PDFViewerApplication.setTitleUsingUrl(file.name);
-      // Read the local file into a Uint8Array.
-      const fileReader = new FileReader();
-      fileReader.onload = function webViewerChangeFileReaderOnload(event) {
-        const buffer = event.target.result;
-        PDFViewerApplication.open(new Uint8Array(buffer));
-      };
-      fileReader.readAsArrayBuffer(file);
-    }
+//     if (!viewerCompatibilityParams.disableCreateObjectURL) {
+//       let url = URL.createObjectURL(file);
+//       if (file.name) {
+//         url = { url, originalUrl: file.name };
+//       }
+//       PDFViewerApplication.open(url);
+//     } else {
+//       PDFViewerApplication.setTitleUsingUrl(file.name);
+//       // Read the local file into a Uint8Array.
+//       const fileReader = new FileReader();
+//       fileReader.onload = function webViewerChangeFileReaderOnload(event) {
+//         const buffer = event.target.result;
+//         PDFViewerApplication.open(new Uint8Array(buffer));
+//       };
+//       fileReader.readAsArrayBuffer(file);
+//     }
 
-    // URL does not reflect proper document location - hiding some icons.
-    const appConfig = PDFViewerApplication.appConfig;
-    appConfig.toolbar.viewBookmark.setAttribute("hidden", "true");
-    appConfig.secondaryToolbar.viewBookmarkButton.setAttribute(
-      "hidden",
-      "true"
-    );
-    appConfig.toolbar.download.setAttribute("hidden", "true");
-    appConfig.secondaryToolbar.downloadButton.setAttribute("hidden", "true");
-  };
+//     // URL does not reflect proper document location - hiding some icons.
+//     const appConfig = PDFViewerApplication.appConfig;
+//     appConfig.toolbar.viewBookmark.setAttribute("hidden", "true");
+//     appConfig.secondaryToolbar.viewBookmarkButton.setAttribute(
+//       "hidden",
+//       "true"
+//     );
+//     appConfig.toolbar.download.setAttribute("hidden", "true");
+//     appConfig.secondaryToolbar.downloadButton.setAttribute("hidden", "true");
+//   };
 
-  webViewerOpenFile = function (evt) {
-    const openFileInputName = PDFViewerApplication.appConfig.openFileInputName;
-    document.getElementById(openFileInputName).click();
-  };
-}
+//   webViewerOpenFile = function (evt) {
+//     const openFileInputName =
+// PDFViewerApplication.appConfig.openFileInputName;
+//     document.getElementById(openFileInputName).click();
+//   };
+// }
 
 function webViewerPresentationMode() {
   PDFViewerApplication.requestPresentationMode();
 }
-function webViewerPrint() {
-  PDFViewerApplication.triggerPrinting();
-}
+// function webViewerPrint() {
+//   PDFViewerApplication.triggerPrinting();
+// }
 function webViewerDownload() {
   PDFViewerApplication.downloadOrSave({ sourceEventType: "download" });
 }
