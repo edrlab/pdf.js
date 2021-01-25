@@ -293,6 +293,7 @@ const PDFViewerApplication = {
     });
 
     this._initializedCapability.resolve();
+    this.eventBus.dispatch("__ready");
   },
 
   /**
@@ -653,7 +654,8 @@ const PDFViewerApplication = {
   },
 
   get supportsPrinting() {
-    return PDFPrintServiceFactory.instance.supportsPrinting;
+    // return PDFPrintServiceFactory.instance.supportsPrinting;
+    return false;
   },
 
   get supportsFullscreen() {
@@ -1243,6 +1245,7 @@ const PDFViewerApplication = {
   },
 
   load(pdfDocument) {
+    this.eventBus.dispatch("__pdfdocument", pdfDocument);
     this.pdfDocument = pdfDocument;
 
     pdfDocument.getDownloadInfo().then(({ length }) => {
@@ -2152,7 +2155,7 @@ const PDFViewerApplication = {
     eventBus._on("namedaction", webViewerNamedAction);
     eventBus._on("presentationmodechanged", webViewerPresentationModeChanged);
     eventBus._on("presentationmode", webViewerPresentationMode);
-    eventBus._on("print", webViewerPrint);
+    // eventBus._on("print", webViewerPrint);
     eventBus._on("download", webViewerDownload);
     eventBus._on("save", webViewerSave);
     eventBus._on("firstpage", webViewerFirstPage);
@@ -2184,8 +2187,8 @@ const PDFViewerApplication = {
       eventBus._on("pagechanging", _boundEvents.reportPageStatsPDFBug);
     }
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      eventBus._on("fileinputchange", webViewerFileInputChange);
-      eventBus._on("openfile", webViewerOpenFile);
+      // eventBus._on("fileinputchange", webViewerFileInputChange);
+      // eventBus._on("openfile", webViewerOpenFile);
     }
   },
 
@@ -2249,7 +2252,7 @@ const PDFViewerApplication = {
     eventBus._off("namedaction", webViewerNamedAction);
     eventBus._off("presentationmodechanged", webViewerPresentationModeChanged);
     eventBus._off("presentationmode", webViewerPresentationMode);
-    eventBus._off("print", webViewerPrint);
+    // eventBus._off("print", webViewerPrint);
     eventBus._off("download", webViewerDownload);
     eventBus._off("save", webViewerSave);
     eventBus._off("firstpage", webViewerFirstPage);
@@ -2281,8 +2284,8 @@ const PDFViewerApplication = {
       _boundEvents.reportPageStatsPDFBug = null;
     }
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      eventBus._off("fileinputchange", webViewerFileInputChange);
-      eventBus._off("openfile", webViewerOpenFile);
+      // eventBus._off("fileinputchange", webViewerFileInputChange);
+      // eventBus._off("openfile", webViewerOpenFile);
     }
 
     _boundEvents.beforePrint = null;
