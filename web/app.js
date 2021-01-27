@@ -2186,6 +2186,40 @@ const PDFViewerApplication = {
       eventBus._on("pagerendered", _boundEvents.reportPageStatsPDFBug);
       eventBus._on("pagechanging", _boundEvents.reportPageStatsPDFBug);
     }
+
+    const pageRenderedExtract = async (ev) => {
+      try {
+        if (ev.pageNumber === 1) {
+          const page = ev.source;
+          const img = page?.canvas?.toDataURL("image/png");
+          const doc = page?.annotationLayerFactory?.pdfDocument;
+          const metadata = await doc.getMetadata();
+          const numberofpages = doc?.numPages;
+          const numberOfPagesChecked = typeof numberofpages === "number" ? numberofpages : 0;
+
+          const data = {
+            ...metadata,
+            img,
+            numberofpages: numberOfPagesChecked,
+          };
+
+          const str = JSON.stringify(data);
+
+          // const ipc = require('electron').ipcRenderer;
+          const ipc = window.electronIpcRenderer;
+          if (ipc) {
+            ipc.send("pdfjs-extract-data", str);
+          }
+
+          eventBus._off("pagerendered", pageRenderedExtract);
+        }
+      } catch (e) {
+        console.log("ERROR TO EXTRACT COVER AND METADATA FROM PDF");
+        console.log("ERROR", e);
+      }
+    };
+    eventBus._on("pagerendered", pageRenderedExtract);
+
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       // eventBus._on("fileinputchange", webViewerFileInputChange);
       // eventBus._on("openfile", webViewerOpenFile);

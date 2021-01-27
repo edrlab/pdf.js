@@ -207,6 +207,7 @@ function createWebpackConfig(
   if (enableSourceMaps) {
     babelExcludes.push("src[\\\\\\/]core[\\\\\\/](glyphlist|unicode)");
   }
+  // babelExcludes.push("electron");
   const babelExcludeRegExp = new RegExp(`(${babelExcludes.join("|")})`);
 
   // Since logical assignment operators is a fairly new ECMAScript feature,
@@ -233,10 +234,22 @@ function createWebpackConfig(
     );
   }
 
+  // "IgnorePlugin" produces the following bundle output:
+  // const ipc = Object(function webpackMissingModule() { var e = new Error("Cannot find module 'electron'"); e.code = 'MODULE_NOT_FOUND'; throw e; }()).ipcRenderer;
+  // plugins.push(
+  //   new webpack2.IgnorePlugin({ resourceRegExp: /^electron$/ })
+  // );
+
   // Required to expose e.g., the `window` object.
   output.globalObject = "this";
 
   return {
+    // "externals" produces the following bundle output:
+    // if(typeof electron === 'undefined') { var e = new Error("Cannot find module 'electron'"); e.code = 'MODULE_NOT_FOUND'; throw e; }
+    // module.exports = electron;
+    // externals: {
+    //   electron: "electron",
+    // },
     mode: "none",
     output,
     performance: {
