@@ -2191,24 +2191,39 @@ const PDFViewerApplication = {
       try {
         if (ev.pageNumber === 1) {
           const page = ev.source;
-          const img = page?.canvas?.toDataURL("image/png");
+          if (!page || !page.canvas) {
+            throw Error("PDF PAGE CANVAS??!");
+          }
+
+          // const img = page?.canvas?.toDataURL("image/png");
+          const blob = await new Promise((res, _rej) => {
+            page.canvas.toBlob(
+              (blob) => {
+                res(blob);
+              },
+              "image/png",
+              0.95
+            );
+          });
+          const img = await blob.arrayBuffer();
+
           const doc = page?.annotationLayerFactory?.pdfDocument;
           const metadata = await doc.getMetadata();
           const numberofpages = doc?.numPages;
           const numberOfPagesChecked = typeof numberofpages === "number" ? numberofpages : 0;
 
+          // https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
           const data = {
             ...metadata,
             img,
             numberofpages: numberOfPagesChecked,
           };
 
-          const str = JSON.stringify(data);
-
+          // https://www.electronjs.org/docs/api/ipc-renderer#ipcrenderersendchannel-args
           // const ipc = require('electron').ipcRenderer;
           const ipc = window.electronIpcRenderer;
           if (ipc) {
-            ipc.send("pdfjs-extract-data", str);
+            ipc.send("pdfjs-extract-data", data);
           }
 
           eventBus._off("pagerendered", pageRenderedExtract);
