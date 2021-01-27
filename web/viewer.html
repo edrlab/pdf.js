@@ -32,6 +32,10 @@ See https://github.com/adobe-type-tools/cmap-resources
 <!--#endif-->
     <title>PDF.js viewer</title>
 
+    <script type="text/javascript">
+      window.electronIpcRenderer = require("electron").ipcRenderer;
+    </script>
+
 <!--#if MOZCENTRAL-->
 <!--#include viewer-snippet-firefox-extension.html-->
 <!--#endif-->
