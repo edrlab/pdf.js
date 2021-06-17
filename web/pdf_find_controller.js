@@ -29,6 +29,7 @@ const MATCH_SCROLL_OFFSET_TOP = -50; // px
 const MATCH_SCROLL_OFFSET_LEFT = -400; // px
 
 const CHARACTERS_TO_NORMALIZE = {
+  "\u2010": "-", // Hyphen
   "\u2018": "'", // Left single quotation mark
   "\u2019": "'", // Right single quotation mark
   "\u201A": "'", // Single low-9 quotation mark
@@ -223,7 +224,7 @@ class PDFFindController {
       top: MATCH_SCROLL_OFFSET_TOP,
       left: MATCH_SCROLL_OFFSET_LEFT,
     };
-    scrollIntoView(element, spot, /* skipOverflowHiddenElements = */ true);
+    scrollIntoView(element, spot, /* scrollMatches = */ true);
   }
 
   _reset() {
@@ -249,7 +250,7 @@ class PDFFindController {
     this._pageDiffs = [];
     this._matchesCountTotal = 0;
     this._pagesToSearch = null;
-    this._pendingFindMatches = Object.create(null);
+    this._pendingFindMatches = new Set();
     this._resumePageIdx = null;
     this._dirtyMatch = false;
     clearTimeout(this._findTimeout);
@@ -600,12 +601,12 @@ class PDFFindController {
 
       for (let i = 0; i < numPages; i++) {
         // Start finding the matches as soon as the text is extracted.
-        if (this._pendingFindMatches[i] === true) {
+        if (this._pendingFindMatches.has(i)) {
           continue;
         }
-        this._pendingFindMatches[i] = true;
+        this._pendingFindMatches.add(i);
         this._extractTextPromises[i].then(pageIdx => {
-          delete this._pendingFindMatches[pageIdx];
+          this._pendingFindMatches.delete(pageIdx);
           this._calculateMatch(pageIdx);
         });
       }
@@ -771,7 +772,7 @@ class PDFFindController {
       total = this._matchesCountTotal;
     if (matchIdx !== -1) {
       for (let i = 0; i < pageIdx; i++) {
-        current += (this._pageMatches[i] && this._pageMatches[i].length) || 0;
+        current += this._pageMatches[i]?.length || 0;
       }
       current += matchIdx + 1;
     }
@@ -797,7 +798,7 @@ class PDFFindController {
       state,
       previous,
       matchesCount: this._requestMatchesCount(),
-      rawQuery: this._state ? this._state.query : null,
+      rawQuery: this._state?.query ?? null,
     });
   }
 }

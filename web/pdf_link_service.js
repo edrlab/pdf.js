@@ -108,16 +108,6 @@ class PDFLinkService {
   }
 
   /**
-   * @deprecated
-   */
-  navigateTo(dest) {
-    console.error(
-      "Deprecated method: `navigateTo`, use `goToDestination` instead."
-    );
-    this.goToDestination(dest);
-  }
-
-  /**
    * @private
    */
   _goToDestinationHelper(rawDest, namedDest = null, explicitDest) {
@@ -445,7 +435,7 @@ class PDFLinkService {
   _cachedPageNumber(pageRef) {
     const refStr =
       pageRef.gen === 0 ? `${pageRef.num}R` : `${pageRef.num}R${pageRef.gen}`;
-    return (this._pagesRefCache && this._pagesRefCache[refStr]) || null;
+    return this._pagesRefCache?.[refStr] || null;
   }
 
   /**

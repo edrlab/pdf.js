@@ -820,6 +820,9 @@ class Doc extends PDFObject {
   }
 
   getField(cName) {
+    if (typeof cName === "object") {
+      cName = cName.cName;
+    }
     if (typeof cName !== "string") {
       throw new TypeError("Invalid field name: must be a string");
     }
@@ -828,13 +831,48 @@ class Doc extends PDFObject {
       return searchedField;
     }
 
+    const parts = cName.split("#");
+    let childIndex = NaN;
+    if (parts.length === 2) {
+      childIndex = Math.floor(parseFloat(parts[1]));
+      cName = parts[0];
+    }
+
     for (const [name, field] of this._fields.entries()) {
-      if (name.includes(cName)) {
+      if (name.endsWith(cName)) {
+        if (!isNaN(childIndex)) {
+          const children = this._getChildren(name);
+          if (childIndex < 0 || childIndex >= children.length) {
+            childIndex = 0;
+          }
+          if (childIndex < children.length) {
+            this._fields.set(cName, children[childIndex]);
+            return children[childIndex];
+          }
+        }
+        this._fields.set(cName, field);
         return field;
       }
     }
 
-    return undefined;
+    return null;
+  }
+
+  _getChildren(fieldName) {
+    // Children of foo.bar are foo.bar.oof, foo.bar.rab
+    // but not foo.bar.oof.FOO.
+    const len = fieldName.length;
+    const children = [];
+    const pattern = /^\.[^.]+$/;
+    for (const [name, field] of this._fields.entries()) {
+      if (name.startsWith(fieldName)) {
+        const finalPart = name.slice(len);
+        if (finalPart.match(pattern)) {
+          children.push(field);
+        }
+      }
+    }
+    return children;
   }
 
   getIcon() {
@@ -850,6 +888,9 @@ class Doc extends PDFObject {
   }
 
   getNthFieldName(nIndex) {
+    if (typeof nIndex === "object") {
+      nIndex = nIndex.nIndex;
+    }
     if (typeof nIndex !== "number") {
       throw new TypeError("Invalid field index: must be a number");
     }
@@ -985,6 +1026,18 @@ class Doc extends PDFObject {
     bAnnotations = true,
     printParams = null
   ) {
+    if (typeof bUI === "object") {
+      nStart = bUI.nStart;
+      nEnd = bUI.nEnd;
+      bSilent = bUI.bSilent;
+      bShrinkToFit = bUI.bShrinkToFit;
+      bPrintAsImage = bUI.bPrintAsImage;
+      bReverse = bUI.bReverse;
+      bAnnotations = bUI.bAnnotations;
+      printParams = bUI.printParams;
+      bUI = bUI.bUI;
+    }
+
     // TODO: for now just use nStart and nEnd
     // so need to see how to deal with the other params
     // (if possible)
@@ -1049,15 +1102,22 @@ class Doc extends PDFObject {
   }
 
   resetForm(aFields = null) {
+    if (aFields && !Array.isArray(aFields) && typeof aFields === "object") {
+      aFields = aFields.aFields;
+    }
     let mustCalculate = false;
     if (aFields) {
       for (const fieldName of aFields) {
-        const field = this.getField(fieldName);
-        if (field) {
-          field.value = field.defaultValue;
-          field.valueAsString = field.value;
-          mustCalculate = true;
+        if (!fieldName) {
+          continue;
         }
+        const field = this.getField(fieldName);
+        if (!field) {
+          continue;
+        }
+        field.value = field.defaultValue;
+        field.valueAsString = field.value;
+        mustCalculate = true;
       }
     } else {
       mustCalculate = this._fields.size !== 0;

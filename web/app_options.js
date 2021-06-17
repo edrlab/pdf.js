@@ -52,9 +52,6 @@ const defaultOptions = {
     value: false,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
-  /**
-   * The `disablePreferences` is, conditionally, defined below.
-   */
   enablePermissions: {
     /** @type {boolean} */
     value: false,
@@ -62,17 +59,12 @@ const defaultOptions = {
   },
   enablePrintAutoRotate: {
     /** @type {boolean} */
-    value: false,
+    value: true,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
   enableScripting: {
     /** @type {boolean} */
-    value: typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING"),
-    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
-  },
-  enableWebGL: {
-    /** @type {boolean} */
-    value: false,
+    value: true,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
   externalLinkRel: {
@@ -100,9 +92,6 @@ const defaultOptions = {
     value: "./images/",
     kind: OptionKind.VIEWER,
   },
-  /**
-   * The `locale` is, conditionally, defined below.
-   */
   maxCanvasPixels: {
     /** @type {number} */
     value: 16777216,
@@ -122,7 +111,7 @@ const defaultOptions = {
   renderer: {
     /** @type {string} */
     value: "canvas",
-    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+    kind: OptionKind.VIEWER,
   },
   renderInteractiveForms: {
     /** @type {boolean} */
@@ -203,6 +192,11 @@ const defaultOptions = {
     value: "",
     kind: OptionKind.API,
   },
+  enableXfa: {
+    /** @type {boolean} */
+    value: false,
+    kind: OptionKind.API + OptionKind.PREFERENCE,
+  },
   fontExtraProperties: {
     /** @type {boolean} */
     value: false,
@@ -221,6 +215,14 @@ const defaultOptions = {
   pdfBug: {
     /** @type {boolean} */
     value: false,
+    kind: OptionKind.API,
+  },
+  standardFontDataUrl: {
+    /** @type {string} */
+    value:
+      typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")
+        ? "../external/standard_fonts/"
+        : "../web/standard_fonts/",
     kind: OptionKind.API,
   },
   verbosity: {
@@ -245,7 +247,7 @@ const defaultOptions = {
 };
 if (
   typeof PDFJSDev === "undefined" ||
-  PDFJSDev.test("!PRODUCTION || (GENERIC && !LIB)")
+  PDFJSDev.test("!PRODUCTION || GENERIC")
 ) {
   defaultOptions.disablePreferences = {
     /** @type {boolean} */
@@ -265,7 +267,14 @@ if (
         : "../build/pdf.sandbox.js",
     kind: OptionKind.VIEWER,
   };
+
+  defaultOptions.renderer.kind += OptionKind.PREFERENCE;
 } else if (PDFJSDev.test("CHROME")) {
+  defaultOptions.disableTelemetry = {
+    /** @type {boolean} */
+    value: false,
+    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+  };
   defaultOptions.sandboxBundleSrc = {
     /** @type {string} */
     value: "../build/pdf.sandbox.js",
@@ -287,7 +296,7 @@ class AppOptions {
     }
     const defaultOption = defaultOptions[name];
     if (defaultOption !== undefined) {
-      return defaultOption.compatibility || defaultOption.value;
+      return defaultOption.compatibility ?? defaultOption.value;
     }
     return undefined;
   }
@@ -319,7 +328,7 @@ class AppOptions {
       options[name] =
         userOption !== undefined
           ? userOption
-          : defaultOption.compatibility || defaultOption.value;
+          : defaultOption.compatibility ?? defaultOption.value;
     }
     return options;
   }

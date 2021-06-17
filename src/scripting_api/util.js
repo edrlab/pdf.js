@@ -284,7 +284,8 @@ class Util extends PDFObject {
       seconds: oDate.getSeconds(),
     };
 
-    const patterns = /(mmmm|mmm|mm|m|dddd|ddd|dd|d|yyyy|yy|HH|H|hh|h|MM|M|ss|s|tt|t|\\.)/g;
+    const patterns =
+      /(mmmm|mmm|mm|m|dddd|ddd|dd|d|yyyy|yy|HH|H|hh|h|MM|M|ss|s|tt|t|\\.)/g;
     return cFormat.replace(patterns, function (match, pattern) {
       if (pattern in handlers) {
         return handlers[pattern](data);
@@ -372,6 +373,10 @@ class Util extends PDFObject {
   }
 
   scand(cFormat, cDate) {
+    if (cDate === "") {
+      return new Date();
+    }
+
     switch (cFormat) {
       case 0:
         return this.scand("D:yyyymmddHHMMss", cDate);
@@ -513,7 +518,8 @@ class Util extends PDFObject {
 
       // escape the string
       const escapedFormat = cFormat.replace(/[.*+\-?^${}()|[\]\\]/g, "\\$&");
-      const patterns = /(mmmm|mmm|mm|m|dddd|ddd|dd|d|yyyy|yy|HH|H|hh|h|MM|M|ss|s|tt|t)/g;
+      const patterns =
+        /(mmmm|mmm|mm|m|dddd|ddd|dd|d|yyyy|yy|HH|H|hh|h|MM|M|ss|s|tt|t)/g;
       const actions = [];
 
       const re = escapedFormat.replace(
@@ -525,14 +531,14 @@ class Util extends PDFObject {
         }
       );
 
-      this._scandCache.set(cFormat, [new RegExp(re, "g"), actions]);
+      this._scandCache.set(cFormat, [re, actions]);
     }
 
-    const [regexForFormat, actions] = this._scandCache.get(cFormat);
+    const [re, actions] = this._scandCache.get(cFormat);
 
-    const matches = regexForFormat.exec(cDate);
-    if (matches.length !== actions.length + 1) {
-      throw new Error("Invalid date in util.scand");
+    const matches = new RegExp(re, "g").exec(cDate);
+    if (!matches || matches.length !== actions.length + 1) {
+      return null;
     }
 
     const data = {
