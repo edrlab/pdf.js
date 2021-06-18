@@ -13,3 +13,5 @@ test/tmp/
 test/pdfs/
 test/resources/
 *~/
+gulpfile.js
+web/app.js

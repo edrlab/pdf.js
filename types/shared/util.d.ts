@@ -157,7 +157,7 @@ export namespace CMapCompressionType {
     export const BINARY: number;
     export const STREAM: number;
 }
-export function createObjectURL(data: any, contentType: any, forceDataSchema?: boolean): string;
+export function createObjectURL(data: any, contentType?: string, forceDataSchema?: boolean): string;
 /**
  * Promise Capability object.
  *
@@ -189,12 +189,12 @@ export namespace DocumentActionEventType {
     const WP: string;
     const DP: string;
 }
-export function encodeToXmlString(str: any): any;
 export function escapeString(str: any): any;
 export const FONT_IDENTITY_MATRIX: number[];
 export namespace FontType {
     const UNKNOWN: string;
     const TYPE1: string;
+    const TYPE1STANDARD: string;
     const TYPE1C: string;
     const CIDFONTTYPE0: string;
     const CIDFONTTYPE0C: string;
@@ -226,7 +226,7 @@ export class InvalidPDFException extends InvalidPDFException_base {
     [x: string]: any;
 }
 export function isArrayBuffer(v: any): boolean;
-export function isArrayEqual(arr1: any, arr2: any): any;
+export function isArrayEqual(arr1: any, arr2: any): boolean;
 export function isAscii(str: any): boolean;
 export function isBool(v: any): boolean;
 export namespace IsEvalSupportedCached { }
@@ -238,7 +238,7 @@ declare const MissingPDFException_base: any;
 export class MissingPDFException extends MissingPDFException_base {
     [x: string]: any;
 }
-export function objectFromEntries(iterable: any): any;
+export function objectFromMap(map: any): any;
 export function objectSize(obj: any): number;
 export namespace OPS {
     const dependency: number;
@@ -413,6 +413,7 @@ export namespace UNSUPPORTED_FEATURES {
     const unknown: string;
     const forms: string;
     const javaScript: string;
+    const signatures: string;
     const smask: string;
     const shadingPattern: string;
     const font: string;
@@ -427,6 +428,7 @@ export namespace UNSUPPORTED_FEATURES {
     const errorOperatorList: string;
     const errorFontToUnicode: string;
     const errorFontLoadNative: string;
+    const errorFontBuildPath: string;
     const errorFontGetPath: string;
     const errorMarkedContent: string;
 }
