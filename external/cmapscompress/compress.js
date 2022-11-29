@@ -204,7 +204,7 @@ function parseCMap(binaryData) {
         bufferSize = 0;
       while (s.length < lengthInChars) {
         while (bufferSize < 4 && stack.length > 0) {
-          buffer = (stack.pop() << bufferSize) | buffer;
+          buffer |= stack.pop() << bufferSize;
           bufferSize += 7;
         }
         s = toHexDigit(buffer & 15) + s;
@@ -218,8 +218,8 @@ function parseCMap(binaryData) {
       const sign = fromHexDigit(num[num.length - 1]) & 1 ? 15 : 0;
       let c = 0;
       let result = "";
-      for (let i = 0; i < num.length; i++) {
-        c = (c << 4) | fromHexDigit(num[i]);
+      for (const digit of num) {
+        c = (c << 4) | fromHexDigit(digit);
         result += toHexDigit(sign ? (c >> 1) ^ sign : c >> 1);
         c &= 1;
       }
@@ -375,7 +375,7 @@ function writeNumber(n) {
     let i = n.length;
     while (i > 0) {
       --i;
-      buffer = (fromHexDigit(n[i]) << bufferSize) | buffer;
+      buffer |= fromHexDigit(n[i]) << bufferSize;
       bufferSize += 4;
       if (bufferSize >= 7) {
         s = writeByte((buffer & 0x7f) | (s.length > 0 ? 0x80 : 0)) + s;
@@ -409,7 +409,7 @@ function writeSigned(n) {
       const d = fromHexDigit(n[i]);
       c = (c << 4) | (neg ? d ^ 15 : d);
       t += toHexDigit(c >> 3);
-      c = c & 7;
+      c &= 7;
     }
     t += toHexDigit((c << 1) | (neg ? 1 : 0));
     return writeNumber(t);

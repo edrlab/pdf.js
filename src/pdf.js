@@ -12,31 +12,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* eslint-disable sort-exports/sort-exports */
+
+// eslint-disable-next-line max-len
+/** @typedef {import("./display/api").PDFDocumentLoadingTask} PDFDocumentLoadingTask */
+/** @typedef {import("./display/api").PDFDocumentProxy} PDFDocumentProxy */
+/** @typedef {import("./display/api").PDFPageProxy} PDFPageProxy */
+/** @typedef {import("./display/api").RenderTask} RenderTask */
+/** @typedef {import("./display/display_utils").PageViewport} PageViewport */
+// eslint-disable-next-line max-len
+/** @typedef {import("./display/text_layer").TextLayerRenderTask} TextLayerRenderTask */
 
 import {
-  addLinkAttributes,
-  getFilenameFromUrl,
-  getPdfFilenameFromUrl,
-  isPdfFile,
-  isValidFetchUrl,
-  LinkTarget,
-  loadScript,
-  PDFDateString,
-  RenderingCancelledException,
-} from "./display/display_utils.js";
-import {
-  build,
-  getDocument,
-  LoopbackPort,
-  PDFDataRangeTransport,
-  PDFWorker,
-  setPDFNetworkStreamFactory,
-  version,
-} from "./display/api.js";
-import {
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationMode,
   CMapCompressionType,
-  createObjectURL,
   createPromiseCapability,
   createValidAbsoluteUrl,
   InvalidPDFException,
@@ -44,13 +34,34 @@ import {
   OPS,
   PasswordResponses,
   PermissionFlag,
-  removeNullCharacters,
   shadow,
   UnexpectedResponseException,
   UNSUPPORTED_FEATURES,
   Util,
   VerbosityLevel,
 } from "./shared/util.js";
+import {
+  build,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFWorker,
+  setPDFNetworkStreamFactory,
+  version,
+} from "./display/api.js";
+import {
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  isDataScheme,
+  isPdfFile,
+  isValidFetchUrl,
+  loadScript,
+  PDFDateString,
+  PixelsPerInch,
+  RenderingCancelledException,
+} from "./display/display_utils.js";
+import { AnnotationEditorLayer } from "./display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "./display/editor/tools.js";
 import { AnnotationLayer } from "./display/annotation_layer.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { isNodeJS } from "./shared/is_node.js";
@@ -99,46 +110,41 @@ if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
 }
 
 export {
-  // From "./display/display_utils.js":
-  addLinkAttributes,
-  getFilenameFromUrl,
-  getPdfFilenameFromUrl,
-  isPdfFile,
-  LinkTarget,
-  loadScript,
-  PDFDateString,
-  RenderingCancelledException,
-  // From "./display/api.js":
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
+  AnnotationLayer,
+  AnnotationMode,
   build,
-  getDocument,
-  LoopbackPort,
-  PDFDataRangeTransport,
-  PDFWorker,
-  version,
-  // From "./shared/util.js":
   CMapCompressionType,
-  createObjectURL,
   createPromiseCapability,
   createValidAbsoluteUrl,
+  getDocument,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  GlobalWorkerOptions,
   InvalidPDFException,
+  isDataScheme,
+  isPdfFile,
+  loadScript,
   MissingPDFException,
   OPS,
   PasswordResponses,
+  PDFDataRangeTransport,
+  PDFDateString,
+  PDFWorker,
   PermissionFlag,
-  removeNullCharacters,
+  PixelsPerInch,
+  RenderingCancelledException,
+  renderTextLayer,
   shadow,
+  SVGGraphics,
   UnexpectedResponseException,
   UNSUPPORTED_FEATURES,
   Util,
   VerbosityLevel,
-  // From "./display/annotation_layer.js":
-  AnnotationLayer,
-  // From "./display/worker_options.js":
-  GlobalWorkerOptions,
-  // From "./display/text_layer.js":
-  renderTextLayer,
-  // From "./display/svg.js":
-  SVGGraphics,
-  // From "./display/xfa_layer.js":
+  version,
   XfaLayer,
 };

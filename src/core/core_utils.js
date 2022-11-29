@@ -14,13 +14,19 @@
  */
 
 import {
+  AnnotationEditorPrefix,
   assert,
   BaseException,
+  FontType,
   objectSize,
+  StreamType,
   stringToPDFString,
   warn,
 } from "../shared/util.js";
-import { Dict, isName, isRef, isStream, RefSet } from "./primitives.js";
+import { Dict, isName, Ref, RefSet } from "./primitives.js";
+import { BaseStream } from "./base_stream.js";
+
+const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
 
 function getLookupTableFactory(initializer) {
   let lookup;
@@ -52,15 +58,78 @@ function getArrayLookupTableFactory(initializer) {
 
 class MissingDataException extends BaseException {
   constructor(begin, end) {
-    super(`Missing data [${begin}, ${end})`);
+    super(`Missing data [${begin}, ${end})`, "MissingDataException");
     this.begin = begin;
     this.end = end;
   }
 }
 
-class XRefEntryException extends BaseException {}
+class ParserEOFException extends BaseException {
+  constructor(msg) {
+    super(msg, "ParserEOFException");
+  }
+}
 
-class XRefParseException extends BaseException {}
+class XRefEntryException extends BaseException {
+  constructor(msg) {
+    super(msg, "XRefEntryException");
+  }
+}
+
+class XRefParseException extends BaseException {
+  constructor(msg) {
+    super(msg, "XRefParseException");
+  }
+}
+
+class DocStats {
+  constructor(handler) {
+    this._handler = handler;
+
+    this._streamTypes = new Set();
+    this._fontTypes = new Set();
+  }
+
+  _send() {
+    const streamTypes = Object.create(null),
+      fontTypes = Object.create(null);
+    for (const type of this._streamTypes) {
+      streamTypes[type] = true;
+    }
+    for (const type of this._fontTypes) {
+      fontTypes[type] = true;
+    }
+    this._handler.send("DocStats", { streamTypes, fontTypes });
+  }
+
+  addStreamType(type) {
+    if (
+      typeof PDFJSDev === "undefined" ||
+      PDFJSDev.test("!PRODUCTION || TESTING")
+    ) {
+      assert(StreamType[type] === type, 'addStreamType: Invalid "type" value.');
+    }
+    if (this._streamTypes.has(type)) {
+      return;
+    }
+    this._streamTypes.add(type);
+    this._send();
+  }
+
+  addFontType(type) {
+    if (
+      typeof PDFJSDev === "undefined" ||
+      PDFJSDev.test("!PRODUCTION || TESTING")
+    ) {
+      assert(FontType[type] === type, 'addFontType: Invalid "type" value.');
+    }
+    if (this._fontTypes.has(type)) {
+      return;
+    }
+    this._fontTypes.add(type);
+    this._send();
+  }
+}
 
 /**
  * Get the value of an inheritable property.
@@ -194,7 +263,7 @@ function isWhiteSpace(ch) {
  * each part of the path.
  */
 function parseXFAPath(path) {
-  const positionPattern = /(.+)\[([0-9]+)\]$/;
+  const positionPattern = /(.+)\[(\d+)\]$/;
   return path.split(".").map(component => {
     const m = component.match(positionPattern);
     if (m) {
@@ -244,13 +313,26 @@ function escapePDFName(str) {
   return buffer.join("");
 }
 
+// Replace "(", ")", "\n", "\r" and "\" by "\(", "\)", "\\n", "\\r" and "\\"
+// in order to write it in a PDF file.
+function escapeString(str) {
+  return str.replace(/([()\\\n\r])/g, match => {
+    if (match === "\n") {
+      return "\\n";
+    } else if (match === "\r") {
+      return "\\r";
+    }
+    return `\\${match}`;
+  });
+}
+
 function _collectJS(entry, xref, list, parents) {
   if (!entry) {
     return;
   }
 
   let parent = null;
-  if (isRef(entry)) {
+  if (entry instanceof Ref) {
     if (parents.has(entry)) {
       // If we've already found entry then we've a cycle.
       return;
@@ -264,15 +346,15 @@ function _collectJS(entry, xref, list, parents) {
       _collectJS(element, xref, list, parents);
     }
   } else if (entry instanceof Dict) {
-    if (isName(entry.get("S"), "JavaScript") && entry.has("JS")) {
+    if (isName(entry.get("S"), "JavaScript")) {
       const js = entry.get("JS");
       let code;
-      if (isStream(js)) {
+      if (js instanceof BaseStream) {
         code = js.getString();
-      } else {
+      } else if (typeof js === "string") {
         code = js;
       }
-      code = stringToPDFString(code);
+      code = code && stringToPDFString(code).replace(/\u0000/g, "");
       if (code) {
         list.push(code);
       }
@@ -414,10 +496,7 @@ function validateCSSFont(cssFontInfo) {
   } else {
     // See https://developer.mozilla.org/en-US/docs/Web/CSS/custom-ident.
     for (const ident of fontFamily.split(/[ \t]+/)) {
-      if (
-        /^([0-9]|(-([0-9]|-)))/.test(ident) ||
-        !/^[a-zA-Z0-9\-_\\]+$/.test(ident)
-      ) {
+      if (/^(\d|(-(\d|-)))/.test(ident) || !/^[\w-\\]+$/.test(ident)) {
         warn(
           `XFA - FontFamily contains some invalid <custom-ident>: ${fontFamily}.`
         );
@@ -440,20 +519,141 @@ function validateCSSFont(cssFontInfo) {
   return true;
 }
 
+function recoverJsURL(str) {
+  // Attempt to recover valid URLs from `JS` entries with certain
+  // white-listed formats:
+  //  - window.open('http://example.com')
+  //  - app.launchURL('http://example.com', true)
+  //  - xfa.host.gotoURL('http://example.com')
+  const URL_OPEN_METHODS = ["app.launchURL", "window.open", "xfa.host.gotoURL"];
+  const regex = new RegExp(
+    "^\\s*(" +
+      URL_OPEN_METHODS.join("|").split(".").join("\\.") +
+      ")\\((?:'|\")([^'\"]*)(?:'|\")(?:,\\s*(\\w+)\\)|\\))",
+    "i"
+  );
+
+  const jsUrl = regex.exec(str);
+  if (jsUrl && jsUrl[2]) {
+    const url = jsUrl[2];
+    let newWindow = false;
+
+    if (jsUrl[3] === "true" && jsUrl[1] === "app.launchURL") {
+      newWindow = true;
+    }
+    return { url, newWindow };
+  }
+
+  return null;
+}
+
+function numberToString(value) {
+  if (Number.isInteger(value)) {
+    return value.toString();
+  }
+
+  const roundedValue = Math.round(value * 100);
+  if (roundedValue % 100 === 0) {
+    return (roundedValue / 100).toString();
+  }
+
+  if (roundedValue % 10 === 0) {
+    return value.toFixed(1);
+  }
+
+  return value.toFixed(2);
+}
+
+function getNewAnnotationsMap(annotationStorage) {
+  if (!annotationStorage) {
+    return null;
+  }
+  const newAnnotationsByPage = new Map();
+  // The concept of page in a XFA is very different, so
+  // editing is just not implemented.
+  for (const [key, value] of annotationStorage) {
+    if (!key.startsWith(AnnotationEditorPrefix)) {
+      continue;
+    }
+    let annotations = newAnnotationsByPage.get(value.pageIndex);
+    if (!annotations) {
+      annotations = [];
+      newAnnotationsByPage.set(value.pageIndex, annotations);
+    }
+    annotations.push(value);
+  }
+  return newAnnotationsByPage.size > 0 ? newAnnotationsByPage : null;
+}
+
+function isAscii(str) {
+  return /^[\x00-\x7F]*$/.test(str);
+}
+
+function stringToUTF16HexString(str) {
+  const buf = [];
+  for (let i = 0, ii = str.length; i < ii; i++) {
+    const char = str.charCodeAt(i);
+    buf.push(
+      ((char >> 8) & 0xff).toString(16).padStart(2, "0"),
+      (char & 0xff).toString(16).padStart(2, "0")
+    );
+  }
+  return buf.join("");
+}
+
+function stringToUTF16String(str, bigEndian = false) {
+  const buf = [];
+  if (bigEndian) {
+    buf.push("\xFE\xFF");
+  }
+  for (let i = 0, ii = str.length; i < ii; i++) {
+    const char = str.charCodeAt(i);
+    buf.push(
+      String.fromCharCode((char >> 8) & 0xff),
+      String.fromCharCode(char & 0xff)
+    );
+  }
+  return buf.join("");
+}
+
+function getRotationMatrix(rotation, width, height) {
+  switch (rotation) {
+    case 90:
+      return [0, 1, -1, 0, width, 0];
+    case 180:
+      return [-1, 0, 0, -1, width, height];
+    case 270:
+      return [0, -1, 1, 0, 0, height];
+    default:
+      throw new Error("Invalid rotation");
+  }
+}
+
 export {
   collectActions,
+  DocStats,
   encodeToXmlString,
   escapePDFName,
+  escapeString,
   getArrayLookupTableFactory,
   getInheritableProperty,
   getLookupTableFactory,
+  getNewAnnotationsMap,
+  getRotationMatrix,
+  isAscii,
   isWhiteSpace,
   log2,
   MissingDataException,
+  numberToString,
+  ParserEOFException,
   parseXFAPath,
+  PDF_VERSION_REGEXP,
   readInt8,
   readUint16,
   readUint32,
+  recoverJsURL,
+  stringToUTF16HexString,
+  stringToUTF16String,
   toRomanNumerals,
   validateCSSFont,
   XRefEntryException,

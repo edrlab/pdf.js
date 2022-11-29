@@ -13,11 +13,24 @@
  * limitations under the License.
  */
 
-import { PageViewport } from "./display_utils.js";
+/** @typedef {import("./display_utils").PageViewport} PageViewport */
+/** @typedef {import("../../web/interfaces").IPDFLinkService} IPDFLinkService */
+
+import { XfaText } from "./xfa_text.js";
+
+/**
+ * @typedef {Object} XfaLayerParameters
+ * @property {PageViewport} viewport
+ * @property {HTMLDivElement} div
+ * @property {Object} xfaHtml
+ * @property {AnnotationStorage} [annotationStorage]
+ * @property {IPDFLinkService} linkService
+ * @property {string} [intent] - (default value is 'display').
+ */
 
 class XfaLayer {
-  static setupStorage(html, fieldId, element, storage, intent) {
-    const storedData = storage.getValue(fieldId, { value: null });
+  static setupStorage(html, id, element, storage, intent) {
+    const storedData = storage.getValue(id, { value: null });
     switch (element.name) {
       case "textarea":
         if (storedData.value !== null) {
@@ -27,36 +40,30 @@ class XfaLayer {
           break;
         }
         html.addEventListener("input", event => {
-          storage.setValue(fieldId, { value: event.target.value });
+          storage.setValue(id, { value: event.target.value });
         });
         break;
       case "input":
-        if (element.attributes.type === "radio") {
-          if (storedData.value) {
+        if (
+          element.attributes.type === "radio" ||
+          element.attributes.type === "checkbox"
+        ) {
+          if (storedData.value === element.attributes.xfaOn) {
             html.setAttribute("checked", true);
+          } else if (storedData.value === element.attributes.xfaOff) {
+            // The checked attribute may have been set when opening the file,
+            // unset through the UI and we're here because of printing.
+            html.removeAttribute("checked");
           }
           if (intent === "print") {
             break;
           }
           html.addEventListener("change", event => {
-            const { target } = event;
-            for (const radio of document.getElementsByName(target.name)) {
-              if (radio !== target) {
-                const id = radio.id;
-                storage.setValue(id.split("-")[0], { value: false });
-              }
-            }
-            storage.setValue(fieldId, { value: target.checked });
-          });
-        } else if (element.attributes.type === "checkbox") {
-          if (storedData.value) {
-            html.setAttribute("checked", true);
-          }
-          if (intent === "print") {
-            break;
-          }
-          html.addEventListener("input", event => {
-            storage.setValue(fieldId, { value: event.target.checked });
+            storage.setValue(id, {
+              value: event.target.checked
+                ? event.target.getAttribute("xfaOn")
+                : event.target.getAttribute("xfaOff"),
+            });
           });
         } else {
           if (storedData.value !== null) {
@@ -66,7 +73,7 @@ class XfaLayer {
             break;
           }
           html.addEventListener("input", event => {
-            storage.setValue(fieldId, { value: event.target.value });
+            storage.setValue(id, { value: event.target.value });
           });
         }
         break;
@@ -82,84 +89,123 @@ class XfaLayer {
           const options = event.target.options;
           const value =
             options.selectedIndex === -1
-              ? null
+              ? ""
               : options[options.selectedIndex].value;
-          storage.setValue(fieldId, { value });
+          storage.setValue(id, { value });
         });
         break;
     }
   }
 
-  static setAttributes(html, element, storage, intent) {
+  static setAttributes({ html, element, storage = null, intent, linkService }) {
     const { attributes } = element;
+    const isHTMLAnchorElement = html instanceof HTMLAnchorElement;
+
     if (attributes.type === "radio") {
       // Avoid to have a radio group when printing with the same as one
       // already displayed.
       attributes.name = `${attributes.name}-${intent}`;
     }
     for (const [key, value] of Object.entries(attributes)) {
-      if (value === null || value === undefined || key === "fieldId") {
+      if (value === null || value === undefined) {
         continue;
       }
 
-      if (key !== "style") {
-        if (key === "textContent") {
+      switch (key) {
+        case "class":
+          if (value.length) {
+            html.setAttribute(key, value.join(" "));
+          }
+          break;
+        case "dataId":
+          // We don't need to add dataId in the html object but it can
+          // be useful to know its value when writing printing tests:
+          // in this case, don't skip dataId to have its value.
+          break;
+        case "id":
+          html.setAttribute("data-element-id", value);
+          break;
+        case "style":
+          Object.assign(html.style, value);
+          break;
+        case "textContent":
           html.textContent = value;
-        } else if (key === "class") {
-          html.setAttribute(key, value.join(" "));
-        } else {
-          html.setAttribute(key, value);
-        }
-      } else {
-        Object.assign(html.style, value);
+          break;
+        default:
+          if (!isHTMLAnchorElement || (key !== "href" && key !== "newWindow")) {
+            html.setAttribute(key, value);
+          }
       }
     }
 
-    // Set the value after the others to be sure overwrite
-    // any other values.
-    if (storage && attributes.fieldId !== undefined) {
-      this.setupStorage(html, attributes.fieldId, element, storage);
+    if (isHTMLAnchorElement) {
+      linkService.addLinkAttributes(
+        html,
+        attributes.href,
+        attributes.newWindow
+      );
+    }
+
+    // Set the value after the others to be sure to overwrite any other values.
+    if (storage && attributes.dataId) {
+      this.setupStorage(html, attributes.dataId, element, storage);
     }
   }
 
+  /**
+   * Render the XFA layer.
+   *
+   * @param {XfaLayerParameters} parameters
+   */
   static render(parameters) {
     const storage = parameters.annotationStorage;
-    const root = parameters.xfa;
+    const linkService = parameters.linkService;
+    const root = parameters.xfaHtml;
     const intent = parameters.intent || "display";
     const rootHtml = document.createElement(root.name);
     if (root.attributes) {
-      this.setAttributes(rootHtml, root);
+      this.setAttributes({
+        html: rootHtml,
+        element: root,
+        intent,
+        linkService,
+      });
     }
     const stack = [[root, -1, rootHtml]];
 
     const rootDiv = parameters.div;
-    rootDiv.appendChild(rootHtml);
+    rootDiv.append(rootHtml);
 
-    let { viewport } = parameters;
-    if (!(viewport instanceof PageViewport)) {
-      viewport = new PageViewport(viewport);
+    if (parameters.viewport) {
+      const transform = `matrix(${parameters.viewport.transform.join(",")})`;
+      rootDiv.style.transform = transform;
     }
-    const coeffs = viewport.transform.join(",");
-    rootDiv.style.transform = `matrix(${coeffs})`;
 
     // Set defaults.
-    rootDiv.setAttribute("class", "xfaLayer xfaFont");
+    if (intent !== "richText") {
+      rootDiv.setAttribute("class", "xfaLayer xfaFont");
+    }
+
+    // Text nodes used for the text highlighter.
+    const textDivs = [];
 
     while (stack.length > 0) {
-      const [parent, i, html] = stack[stack.length - 1];
+      const [parent, i, html] = stack.at(-1);
       if (i + 1 === parent.children.length) {
         stack.pop();
         continue;
       }
 
-      const child = parent.children[++stack[stack.length - 1][1]];
+      const child = parent.children[++stack.at(-1)[1]];
       if (child === null) {
         continue;
       }
 
       const { name } = child;
       if (name === "#text") {
-        html.appendChild(document.createTextNode(child.value));
+        const node = document.createTextNode(child.value);
+        textDivs.push(node);
+        html.append(node);
         continue;
       }
 
@@ -170,25 +216,59 @@ class XfaLayer {
         childHtml = document.createElement(name);
       }
 
-      html.appendChild(childHtml);
+      html.append(childHtml);
       if (child.attributes) {
-        this.setAttributes(childHtml, child, storage, intent);
+        this.setAttributes({
+          html: childHtml,
+          element: child,
+          storage,
+          intent,
+          linkService,
+        });
       }
 
       if (child.children && child.children.length > 0) {
         stack.push([child, -1, childHtml]);
       } else if (child.value) {
-        childHtml.appendChild(document.createTextNode(child.value));
+        const node = document.createTextNode(child.value);
+        if (XfaText.shouldBuildText(name)) {
+          textDivs.push(node);
+        }
+        childHtml.append(node);
       }
     }
+
+    /**
+     * TODO: re-enable that stuff once we've JS implementation.
+     * See https://bugzilla.mozilla.org/show_bug.cgi?id=1719465.
+     *
+     * for (const el of rootDiv.querySelectorAll(
+     * ".xfaDisabled input, .xfaDisabled textarea"
+     * )) {
+     * el.setAttribute("disabled", true);
+     * }
+     * for (const el of rootDiv.querySelectorAll(
+     * ".xfaReadOnly input, .xfaReadOnly textarea"
+     * )) {
+     * el.setAttribute("readOnly", true);
+     * }
+     */
+
+    for (const el of rootDiv.querySelectorAll(
+      ".xfaNonInteractive input, .xfaNonInteractive textarea"
+    )) {
+      el.setAttribute("readOnly", true);
+    }
+
+    return {
+      textDivs,
+    };
   }
 
   /**
-   * Update the xfa layer.
+   * Update the XFA layer.
    *
-   * @public
    * @param {XfaLayerParameters} parameters
-   * @memberof XfaLayer
    */
   static update(parameters) {
     const transform = `matrix(${parameters.viewport.transform.join(",")})`;

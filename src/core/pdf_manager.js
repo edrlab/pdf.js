@@ -13,7 +13,12 @@
  * limitations under the License.
  */
 
-import { createValidAbsoluteUrl, unreachable, warn } from "../shared/util.js";
+import {
+  createValidAbsoluteUrl,
+  shadow,
+  unreachable,
+  warn,
+} from "../shared/util.js";
 import { ChunkedStreamManager } from "./chunked_stream.js";
 import { MissingDataException } from "./core_utils.js";
 import { PDFDocument } from "./document.js";
@@ -46,11 +51,8 @@ class BasePdfManager {
   }
 
   get docBaseUrl() {
-    return this._docBaseUrl;
-  }
-
-  onLoadedStream() {
-    unreachable("Abstract method `onLoadedStream` called");
+    const catalog = this.pdfDocument.catalog;
+    return shadow(this, "docBaseUrl", catalog.baseUrl || this._docBaseUrl);
   }
 
   ensureDoc(prop, args) {
@@ -77,6 +79,14 @@ class BasePdfManager {
     return this.pdfDocument.loadXfaFonts(handler, task);
   }
 
+  loadXfaImages() {
+    return this.pdfDocument.loadXfaImages();
+  }
+
+  serializeXfaData(annotationStorage) {
+    return this.pdfDocument.serializeXfaData(annotationStorage);
+  }
+
   cleanup(manuallyTriggered = false) {
     return this.pdfDocument.cleanup(manuallyTriggered);
   }
@@ -89,7 +99,7 @@ class BasePdfManager {
     unreachable("Abstract method `requestRange` called");
   }
 
-  requestLoadedStream() {
+  requestLoadedStream(noFetch = false) {
     unreachable("Abstract method `requestLoadedStream` called");
   }
 
@@ -107,12 +117,21 @@ class BasePdfManager {
 }
 
 class LocalPdfManager extends BasePdfManager {
-  constructor(docId, data, password, evaluatorOptions, enableXfa, docBaseUrl) {
+  constructor(
+    docId,
+    data,
+    password,
+    msgHandler,
+    evaluatorOptions,
+    enableXfa,
+    docBaseUrl
+  ) {
     super();
 
     this._docId = docId;
     this._password = password;
     this._docBaseUrl = parseDocBaseUrl(docBaseUrl);
+    this.msgHandler = msgHandler;
     this.evaluatorOptions = evaluatorOptions;
     this.enableXfa = enableXfa;
 
@@ -133,9 +152,7 @@ class LocalPdfManager extends BasePdfManager {
     return Promise.resolve();
   }
 
-  requestLoadedStream() {}
-
-  onLoadedStream() {
+  requestLoadedStream(noFetch = false) {
     return this._loadedStreamPromise;
   }
 
@@ -189,16 +206,12 @@ class NetworkPdfManager extends BasePdfManager {
     return this.streamManager.requestRange(begin, end);
   }
 
-  requestLoadedStream() {
-    this.streamManager.requestAllChunks();
+  requestLoadedStream(noFetch = false) {
+    return this.streamManager.requestAllChunks(noFetch);
   }
 
   sendProgressiveData(chunk) {
     this.streamManager.onReceiveData({ chunk });
-  }
-
-  onLoadedStream() {
-    return this.streamManager.onLoadedStream();
   }
 
   terminate(reason) {

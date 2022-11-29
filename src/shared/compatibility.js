@@ -12,103 +12,75 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* globals __non_webpack_require__ */
 
 import { isNodeJS } from "./is_node.js";
 
-// Skip compatibility checks for modern builds and if we already ran the module.
-if (
-  (typeof PDFJSDev === "undefined" || !PDFJSDev.test("SKIP_BABEL")) &&
-  (typeof globalThis === "undefined" || !globalThis._pdfjsCompatibilityChecked)
-) {
-  // Provides support for globalThis in legacy browsers.
-  // Support: Firefox<65, Chrome<71, Safari<12.1
-  if (typeof globalThis === "undefined" || globalThis.Math !== Math) {
-    // eslint-disable-next-line no-global-assign
-    globalThis = require("core-js/es/global-this");
+// Support: Node.js<16.0.0
+(function checkNodeBtoa() {
+  if (globalThis.btoa || !isNodeJS) {
+    return;
   }
-  globalThis._pdfjsCompatibilityChecked = true;
+  globalThis.btoa = function (chars) {
+    // eslint-disable-next-line no-undef
+    return Buffer.from(chars, "binary").toString("base64");
+  };
+})();
 
-  // Support: Node.js
-  (function checkNodeBtoa() {
-    if (globalThis.btoa || !isNodeJS) {
-      return;
-    }
-    globalThis.btoa = function (chars) {
-      // eslint-disable-next-line no-undef
-      return Buffer.from(chars, "binary").toString("base64");
-    };
-  })();
+// Support: Node.js<16.0.0
+(function checkNodeAtob() {
+  if (globalThis.atob || !isNodeJS) {
+    return;
+  }
+  globalThis.atob = function (input) {
+    // eslint-disable-next-line no-undef
+    return Buffer.from(input, "base64").toString("binary");
+  };
+})();
 
-  // Support: Node.js
-  (function checkNodeAtob() {
-    if (globalThis.atob || !isNodeJS) {
-      return;
-    }
-    globalThis.atob = function (input) {
-      // eslint-disable-next-line no-undef
-      return Buffer.from(input, "base64").toString("binary");
-    };
-  })();
+// Support: Node.js
+(function checkDOMMatrix() {
+  if (globalThis.DOMMatrix || !isNodeJS) {
+    return;
+  }
+  globalThis.DOMMatrix = __non_webpack_require__("canvas").DOMMatrix;
+})();
 
-  // Support: Node.js
-  (function checkDOMMatrix() {
-    if (globalThis.DOMMatrix || !isNodeJS) {
-      return;
-    }
-    globalThis.DOMMatrix = require("dommatrix/dist/dommatrix.js");
-  })();
+// Support: Node.js
+(function checkReadableStream() {
+  if (globalThis.ReadableStream || !isNodeJS) {
+    return;
+  }
+  globalThis.ReadableStream = __non_webpack_require__(
+    "web-streams-polyfill/dist/ponyfill.js"
+  ).ReadableStream;
+})();
 
-  // Provides support for Object.fromEntries in legacy browsers.
-  // Support: Firefox<63, Chrome<73, Safari<12.1, Node.js<12.0.0
-  (function checkObjectFromEntries() {
-    if (Object.fromEntries) {
-      return;
-    }
-    require("core-js/es/object/from-entries.js");
-  })();
+// Support: Firefox<90, Chrome<92, Safari<15.4, Node.js<16.6.0
+(function checkArrayAt() {
+  if (Array.prototype.at) {
+    return;
+  }
+  require("core-js/es/array/at.js");
+})();
 
-  // Provides support for *recent* additions to the Promise specification,
-  // however basic Promise support is assumed to be available natively.
-  // Support: Firefox<71, Chrome<76, Safari<13, Node.js<12.9.0
-  (function checkPromise() {
-    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("IMAGE_DECODERS")) {
-      // The current image decoders are synchronous, hence `Promise` shouldn't
-      // need to be polyfilled for the IMAGE_DECODERS build target.
-      return;
-    }
-    if (globalThis.Promise.allSettled) {
-      return;
-    }
-    globalThis.Promise = require("core-js/es/promise/index.js");
-  })();
+// Support: Firefox<90, Chrome<92, Safari<15.4, Node.js<16.6.0
+(function checkTypedArrayAt() {
+  if (Uint8Array.prototype.at) {
+    return;
+  }
+  require("core-js/es/typed-array/at.js");
+})();
 
-  // Support: Node.js
-  (function checkReadableStream() {
-    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("IMAGE_DECODERS")) {
-      // The current image decoders are synchronous, hence `ReadableStream`
-      // shouldn't need to be polyfilled for the IMAGE_DECODERS build target.
-      return;
-    }
-    let isReadableStreamSupported = false;
-
-    if (typeof ReadableStream !== "undefined") {
-      // MS Edge may say it has ReadableStream but they are not up to spec yet.
-      try {
-        // eslint-disable-next-line no-new
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        });
-        isReadableStreamSupported = true;
-      } catch (e) {
-        // The ReadableStream constructor cannot be used.
-      }
-    }
-    if (isReadableStreamSupported) {
-      return;
-    }
-    globalThis.ReadableStream =
-      require("web-streams-polyfill/dist/ponyfill.js").ReadableStream;
-  })();
-}
+// Support: Firefox<94, Chrome<98, Safari<15.4, Node.js<17.0.0
+(function checkStructuredClone() {
+  if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("IMAGE_DECODERS")) {
+    // The current image decoders are synchronous, hence `structuredClone`
+    // shouldn't need to be polyfilled for the IMAGE_DECODERS build target.
+    return;
+  }
+  if (globalThis.structuredClone) {
+    return;
+  }
+  require("core-js/web/structured-clone.js");
+})();

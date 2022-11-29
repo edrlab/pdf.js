@@ -18,18 +18,22 @@ import { readUint16 } from "./core_utils.js";
 
 class JpegError extends BaseException {
   constructor(msg) {
-    super(`JPEG error: ${msg}`);
+    super(`JPEG error: ${msg}`, "JpegError");
   }
 }
 
 class DNLMarkerError extends BaseException {
   constructor(message, scanLines) {
-    super(message);
+    super(message, "DNLMarkerError");
     this.scanLines = scanLines;
   }
 }
 
-class EOIMarkerError extends BaseException {}
+class EOIMarkerError extends BaseException {
+  constructor(msg) {
+    super(msg, "EOIMarkerError");
+  }
+}
 
 /**
  * This code was forked from https://github.com/notmasteryet/jpgjs.
@@ -159,11 +163,11 @@ function decodeScan(
             // Heuristic to attempt to handle corrupt JPEG images with too
             // large `scanLines` parameter, by falling back to the currently
             // parsed number of scanLines when it's at least (approximately)
-            // one order of magnitude smaller than expected (fixes
-            // issue10880.pdf and issue10989.pdf).
+            // one "half" order of magnitude smaller than expected (fixes
+            // issue10880.pdf, issue10989.pdf, issue15492.pdf).
             if (
               maybeScanLines > 0 &&
-              Math.round(frame.scanLines / maybeScanLines) >= 10
+              Math.round(frame.scanLines / maybeScanLines) >= 5
             ) {
               throw new DNLMarkerError(
                 "Found EOI marker (0xFFD9) while parsing scan data, " +
@@ -770,8 +774,7 @@ class JpegImage {
     function prepareComponents(frame) {
       const mcusPerLine = Math.ceil(frame.samplesPerLine / 8 / frame.maxH);
       const mcusPerColumn = Math.ceil(frame.scanLines / 8 / frame.maxV);
-      for (let i = 0, ii = frame.components.length; i < ii; i++) {
-        const component = frame.components[i];
+      for (const component of frame.components) {
         const blocksPerLine = Math.ceil(
           (Math.ceil(frame.samplesPerLine / 8) * component.h) / frame.maxH
         );
@@ -1076,9 +1079,7 @@ class JpegImage {
     this.jfif = jfif;
     this.adobe = adobe;
     this.components = [];
-    for (let i = 0, ii = frame.components.length; i < ii; i++) {
-      const component = frame.components[i];
-
+    for (const component of frame.components) {
       // Prevent errors when DQT markers are placed after SOF{n} markers,
       // by assigning the `quantizationTable` entry after the entire image
       // has been parsed (fixes issue7406.pdf).
@@ -1345,7 +1346,7 @@ class JpegImage {
           (0.00006834815998235662 * y +
             0.00015168452363460973 * k -
             0.09751927774728933) -
-        k * (0.00031891311758832814 * k + 0.7364883807733168);
+        k * (0.0003189131175883281 * k + 0.7364883807733168);
 
       data[offset++] =
         255 +
@@ -1387,11 +1388,9 @@ class JpegImage {
     const data = this._getLinearizedBlockData(width, height, isSourcePDF);
 
     if (this.numComponents === 1 && forceRGB) {
-      const dataLength = data.length;
-      const rgbData = new Uint8ClampedArray(dataLength * 3);
+      const rgbData = new Uint8ClampedArray(data.length * 3);
       let offset = 0;
-      for (let i = 0; i < dataLength; i++) {
-        const grayColor = data[i];
+      for (const grayColor of data) {
         rgbData[offset++] = grayColor;
         rgbData[offset++] = grayColor;
         rgbData[offset++] = grayColor;

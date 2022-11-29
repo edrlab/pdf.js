@@ -93,13 +93,20 @@ DOMElement.prototype = {
   },
 
   setAttribute: function DOMElement_setAttribute(name, value) {
-    value = value || "";
-    value = xmlEncode(value);
-    this.attributes[name] = value;
+    this.attributes[name] = value || "";
   },
 
   setAttributeNS: function DOMElement_setAttributeNS(NS, name, value) {
     this.setAttribute(name, value);
+  },
+
+  append: function DOMElement_append(...elements) {
+    const childNodes = this.childNodes;
+    for (const element of elements) {
+      if (!childNodes.includes(element)) {
+        childNodes.push(element);
+      }
+    }
   },
 
   appendChild: function DOMElement_appendChild(element) {

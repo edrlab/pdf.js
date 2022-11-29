@@ -57,7 +57,7 @@ class BaseCanvasFactory {
   }
 
   /**
-   * @private
+   * @ignore
    */
   _createCanvas(width, height) {
     unreachable("Abstract method `_createCanvas` called.");
@@ -96,7 +96,7 @@ class BaseCMapReaderFactory {
   }
 
   /**
-   * @private
+   * @ignore
    */
   _fetchData(url, compressionType) {
     unreachable("Abstract method `_fetchData` called.");
@@ -129,7 +129,7 @@ class BaseStandardFontDataFactory {
   }
 
   /**
-   * @private
+   * @ignore
    */
   _fetchData(url) {
     unreachable("Abstract method `_fetchData` called.");
@@ -143,14 +143,18 @@ class BaseSVGFactory {
     }
   }
 
-  create(width, height) {
+  create(width, height, skipDimensions = false) {
     if (width <= 0 || height <= 0) {
       throw new Error("Invalid SVG dimensions");
     }
     const svg = this._createSVG("svg:svg");
     svg.setAttribute("version", "1.1");
-    svg.setAttribute("width", `${width}px`);
-    svg.setAttribute("height", `${height}px`);
+
+    if (!skipDimensions) {
+      svg.setAttribute("width", `${width}px`);
+      svg.setAttribute("height", `${height}px`);
+    }
+
     svg.setAttribute("preserveAspectRatio", "none");
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
@@ -165,7 +169,7 @@ class BaseSVGFactory {
   }
 
   /**
-   * @private
+   * @ignore
    */
   _createSVG(type) {
     unreachable("Abstract method `_createSVG` called.");

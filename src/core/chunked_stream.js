@@ -107,6 +107,9 @@ class ChunkedStream extends Stream {
     }
 
     const chunk = Math.floor(pos / this.chunkSize);
+    if (chunk > this.numChunks) {
+      return;
+    }
     if (chunk === this.lastSuccessfulEnsureByteChunk) {
       return;
     }
@@ -125,9 +128,14 @@ class ChunkedStream extends Stream {
       return;
     }
 
-    const chunkSize = this.chunkSize;
-    const beginChunk = Math.floor(begin / chunkSize);
-    const endChunk = Math.floor((end - 1) / chunkSize) + 1;
+    const beginChunk = Math.floor(begin / this.chunkSize);
+    if (beginChunk > this.numChunks) {
+      return;
+    }
+    const endChunk = Math.min(
+      Math.floor((end - 1) / this.chunkSize) + 1,
+      this.numChunks
+    );
     for (let chunk = beginChunk; chunk < endChunk; ++chunk) {
       if (!this._loadedChunks.has(chunk)) {
         throw new MissingDataException(begin, end);
@@ -161,7 +169,7 @@ class ChunkedStream extends Stream {
     return this.bytes[this.pos++];
   }
 
-  getBytes(length, forceClamped = false) {
+  getBytes(length) {
     const bytes = this.bytes;
     const pos = this.pos;
     const strEnd = this.end;
@@ -170,9 +178,7 @@ class ChunkedStream extends Stream {
       if (strEnd > this.progressiveDataLength) {
         this.ensureRange(pos, strEnd);
       }
-      const subarray = bytes.subarray(pos, strEnd);
-      // `this.bytes` is always a `Uint8Array` here.
-      return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
+      return bytes.subarray(pos, strEnd);
     }
 
     let end = pos + length;
@@ -184,9 +190,7 @@ class ChunkedStream extends Stream {
     }
 
     this.pos = end;
-    const subarray = bytes.subarray(pos, end);
-    // `this.bytes` is always a `Uint8Array` here.
-    return forceClamped ? new Uint8ClampedArray(subarray) : subarray;
+    return bytes.subarray(pos, end);
   }
 
   getByteRange(begin, end) {
@@ -278,10 +282,6 @@ class ChunkedStreamManager {
     this._loadedStreamCapability = createPromiseCapability();
   }
 
-  onLoadedStream() {
-    return this._loadedStreamCapability.promise;
-  }
-
   sendRequest(begin, end) {
     const rangeReader = this.pdfNetworkStream.getRangeReader(begin, end);
     if (!rangeReader.isStreamingSupported) {
@@ -290,7 +290,7 @@ class ChunkedStreamManager {
 
     let chunks = [],
       loaded = 0;
-    const promise = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const readChunk = chunk => {
         try {
           if (!chunk.done) {
@@ -311,23 +311,23 @@ class ChunkedStreamManager {
         }
       };
       rangeReader.read().then(readChunk, reject);
-    });
-    promise.then(data => {
+    }).then(data => {
       if (this.aborted) {
         return; // Ignoring any data after abort.
       }
       this.onReceiveData({ chunk: data, begin });
     });
-    // TODO check errors
   }
 
   /**
    * Get all the chunks that are not yet loaded and group them into
    * contiguous ranges to load in as few requests as possible.
    */
-  requestAllChunks() {
-    const missingChunks = this.stream.getMissingChunks();
-    this._requestChunks(missingChunks);
+  requestAllChunks(noFetch = false) {
+    if (!noFetch) {
+      const missingChunks = this.stream.getMissingChunks();
+      this._requestChunks(missingChunks);
+    }
     return this._loadedStreamCapability.promise;
   }
 
@@ -369,7 +369,7 @@ class ChunkedStreamManager {
           groupedChunk.endChunk * this.chunkSize,
           this.length
         );
-        this.sendRequest(begin, end);
+        this.sendRequest(begin, end).catch(capability.reject);
       }
     }
 

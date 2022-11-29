@@ -19,6 +19,7 @@ const Jasmine = require("jasmine");
 
 async function runTests(results) {
   const jasmine = new Jasmine();
+  jasmine.exitOnCompletion = false;
   jasmine.jasmine.DEFAULT_TIMEOUT_INTERVAL = 30000;
 
   jasmine.loadConfig({
@@ -29,6 +30,9 @@ async function runTests(results) {
       "annotation_spec.js",
       "accessibility_spec.js",
       "find_spec.js",
+      "freetext_editor_spec.js",
+      "ink_editor_spec.js",
+      "a11y_spec.js",
     ],
   });
 
@@ -49,10 +53,7 @@ async function runTests(results) {
     suiteStarted(result) {},
   });
 
-  return new Promise(resolve => {
-    jasmine.onComplete(resolve);
-    jasmine.execute();
-  });
+  return jasmine.execute();
 }
 
 exports.runTests = runTests;

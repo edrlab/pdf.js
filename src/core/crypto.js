@@ -24,7 +24,7 @@ import {
   utf8StringToString,
   warn,
 } from "../shared/util.js";
-import { isDict, isName, Name } from "./primitives.js";
+import { Dict, isName, Name } from "./primitives.js";
 import { DecryptStream } from "./decrypt_stream.js";
 
 class ARCFourCipher {
@@ -213,7 +213,7 @@ class Word64 {
       this.low = 0;
     } else {
       this.high = (this.high << places) | (this.low >>> (32 - places));
-      this.low = this.low << places;
+      this.low <<= places;
     }
   }
 
@@ -1014,7 +1014,7 @@ class AESBaseCipher {
     let outputLength = 16 * result.length;
     if (finalize) {
       // undo a padding that is described in RFC 2898
-      const lastBlock = result[result.length - 1];
+      const lastBlock = result.at(-1);
       let psLen = lastBlock[15];
       if (psLen <= 16) {
         for (let i = 15, ii = 16 - psLen; i >= ii; --i) {
@@ -1165,7 +1165,7 @@ class AES128Cipher extends AESBaseCipher {
       t3 = s[t3];
       t4 = s[t4];
       // Rcon
-      t1 = t1 ^ rcon[i];
+      t1 ^= rcon[i];
       for (let n = 0; n < 4; ++n) {
         result[j] = t1 ^= result[j - 16];
         j++;
@@ -1218,7 +1218,7 @@ class AES256Cipher extends AESBaseCipher {
         t3 = s[t3];
         t4 = s[t4];
         // Rcon
-        t1 = t1 ^ r;
+        t1 ^= r;
         if ((r <<= 1) >= 256) {
           r = (r ^ 0x1b) & 0xff;
         }
@@ -1284,7 +1284,7 @@ const PDF20 = (function PDF20Closure() {
     let k = calculateSHA256(input, 0, input.length).subarray(0, 32);
     let e = [0];
     let i = 0;
-    while (i < 64 || e[e.length - 1] > i - 32) {
+    while (i < 64 || e.at(-1) > i - 32) {
       const combinedLength = password.length + k.length + userBytes.length,
         combinedArray = new Uint8Array(combinedLength);
       let writeOffset = 0;
@@ -1304,15 +1304,11 @@ const PDF20 = (function PDF20Closure() {
       e = cipher.encrypt(k1, k.subarray(16, 32));
       // Now we have to take the first 16 bytes of an unsigned big endian
       // integer and compute the remainder modulo 3. That is a fairly large
-      // number and JavaScript isn't going to handle that well, so we're using
-      // a trick that allows us to perform modulo math byte by byte.
-      let remainder = 0;
-      for (let z = 0; z < 16; z++) {
-        remainder *= 256 % 3;
-        remainder %= 3;
-        remainder += (e[z] >>> 0) % 3;
-        remainder %= 3;
-      }
+      // number and JavaScript isn't going to handle that well.
+      // The number is e0 + 256 * e1 + 256^2 * e2... and 256 % 3 === 1, hence
+      // the powers of 256 are === 1 modulo 3 and finally the number modulo 3
+      // is equal to the remainder modulo 3 of the sum of the e_n.
+      const remainder = e.slice(0, 16).reduce((a, b) => a + b, 0) % 3;
       if (remainder === 0) {
         k = calculateSHA256(e, 0, e.length);
       } else if (remainder === 1) {
@@ -1407,11 +1403,12 @@ class CipherTransform {
       // Append some chars equal to "16 - (M mod 16)"
       // where M is the string length (see section 7.6.2 in PDF specification)
       // to have a final string where the length is a multiple of 16.
+      // Special note:
+      //   "Note that the pad is present when M is evenly divisible by 16;
+      //   it contains 16 bytes of 0x10."
       const strLen = s.length;
       const pad = 16 - (strLen % 16);
-      if (pad !== 16) {
-        s = s.padEnd(16 * Math.ceil(strLen / 16), String.fromCharCode(pad));
-      }
+      s += String.fromCharCode(pad).repeat(pad);
 
       // Generate an initialization vector
       const iv = new Uint8Array(16);
@@ -1646,7 +1643,7 @@ const CipherTransformFactory = (function CipherTransformFactoryClosure() {
   }
 
   function buildCipherConstructor(cf, name, num, gen, key) {
-    if (!isName(name)) {
+    if (!(name instanceof Name)) {
       throw new FormatError("Invalid crypt filter name.");
     }
     const cryptFilter = cf.get(name.name);
@@ -1688,6 +1685,7 @@ const CipherTransformFactory = (function CipherTransformFactoryClosure() {
       if (!isName(filter, "Standard")) {
         throw new FormatError("unknown encryption method");
       }
+      this.filterName = filter.name;
       this.dict = dict;
       const algorithm = dict.get("V");
       if (
@@ -1711,7 +1709,7 @@ const CipherTransformFactory = (function CipherTransformFactoryClosure() {
           // Trying to find default handler -- it usually has Length.
           const cfDict = dict.get("CF");
           const streamCryptoName = dict.get("StmF");
-          if (isDict(cfDict) && isName(streamCryptoName)) {
+          if (cfDict instanceof Dict && streamCryptoName instanceof Name) {
             cfDict.suppressEncryption = true; // See comment below.
             const handlerDict = cfDict.get(streamCryptoName.name);
             keyLength = (handlerDict && handlerDict.get("Length")) || 128;
@@ -1836,7 +1834,7 @@ const CipherTransformFactory = (function CipherTransformFactoryClosure() {
 
       if (algorithm >= 4) {
         const cf = dict.get("CF");
-        if (isDict(cf)) {
+        if (cf instanceof Dict) {
           // The 'CF' dictionary itself should not be encrypted, and by setting
           // `suppressEncryption` we can prevent an infinite loop inside of
           // `XRef_fetchUncompressed` if the dictionary contains indirect
@@ -1855,14 +1853,14 @@ const CipherTransformFactory = (function CipherTransformFactoryClosure() {
         return new CipherTransform(
           buildCipherConstructor(
             this.cf,
-            this.stmf,
+            this.strf,
             num,
             gen,
             this.encryptionKey
           ),
           buildCipherConstructor(
             this.cf,
-            this.strf,
+            this.stmf,
             num,
             gen,
             this.encryptionKey

@@ -23,12 +23,17 @@ describe("font_fpgm", function () {
         defaultEncoding: [],
         cMap,
         toUnicode: new ToUnicodeMap([]),
+        xHeight: 0,
+        capHeight: 0,
+        italicAngle: 0,
       });
       const output = await ttx(font.data);
 
       verifyTtxOutput(output);
       expect(
-        /(ENDF\[ \]|SVTCA\[0\])\s*<\/assembly>\s*<\/fpgm>/.test(output)
+        /(ENDF\[ \]|SVTCA\[0\])\s*\/\*.*\*\/\s*<\/assembly>\s*<\/fpgm>/.test(
+          output
+        )
       ).toEqual(true);
     });
   });

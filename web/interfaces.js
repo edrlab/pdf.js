@@ -14,6 +14,24 @@
  */
 /* eslint-disable getter-return */
 
+/** @typedef {import("../src/display/api").PDFPageProxy} PDFPageProxy */
+// eslint-disable-next-line max-len
+/** @typedef {import("../src/display/display_utils").PageViewport} PageViewport */
+// eslint-disable-next-line max-len
+/** @typedef {import("./annotation_layer_builder").AnnotationLayerBuilder} AnnotationLayerBuilder */
+// eslint-disable-next-line max-len
+/** @typedef {import("./annotation_editor_layer_builder").AnnotationEditorLayerBuilder} AnnotationEditorLayerBuilder */
+/** @typedef {import("./event_utils").EventBus} EventBus */
+// eslint-disable-next-line max-len
+/** @typedef {import("./struct_tree_builder").StructTreeLayerBuilder} StructTreeLayerBuilder */
+/** @typedef {import("./text_highlighter").TextHighlighter} TextHighlighter */
+// eslint-disable-next-line max-len
+/** @typedef {import("./text_layer_builder").TextLayerBuilder} TextLayerBuilder */
+/** @typedef {import("./ui_utils").RenderingStates} RenderingStates */
+/** @typedef {import("./xfa_layer_builder").XfaLayerBuilder} XfaLayerBuilder */
+// eslint-disable-next-line max-len
+/** @typedef {import("./text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+
 /**
  * @interface
  */
@@ -46,6 +64,11 @@ class IPDFLinkService {
   /**
    * @type {boolean}
    */
+  get isInPresentationMode() {}
+
+  /**
+   * @type {boolean}
+   */
   get externalLinkEnabled() {}
 
   /**
@@ -62,6 +85,13 @@ class IPDFLinkService {
    * @param {number|string} val - The page number, or page label.
    */
   goToPage(val) {}
+
+  /**
+   * @param {HTMLAnchorElement} link
+   * @param {string} url
+   * @param {boolean} [newWindow]
+   */
+  addLinkAttributes(link, url, newWindow = false) {}
 
   /**
    * @param dest - The PDF destination object.
@@ -86,6 +116,11 @@ class IPDFLinkService {
   executeNamedAction(action) {}
 
   /**
+   * @param {Object} action
+   */
+  executeSetOCGState(action) {}
+
+  /**
    * @param {number} pageNum - page number.
    * @param {Object} pageRef - reference to the page.
    */
@@ -105,35 +140,12 @@ class IPDFLinkService {
 /**
  * @interface
  */
-class IPDFHistory {
-  /**
-   * @param {Object} params
-   */
-  initialize({ fingerprint, resetHistory = false, updateUrl = false }) {}
-
-  reset() {}
-
-  /**
-   * @param {Object} params
-   */
-  push({ namedDest = null, explicitDest, pageNumber }) {}
-
-  /**
-   * @param {number} pageNumber
-   */
-  pushPage(pageNumber) {}
-
-  pushCurrentPosition() {}
-
-  back() {}
-
-  forward() {}
-}
-
-/**
- * @interface
- */
 class IRenderableView {
+  constructor() {
+    /** @type {function | null} */
+    this.resume = null;
+  }
+
   /**
    * @type {string} - Unique ID for rendering queue.
    */
@@ -148,8 +160,6 @@ class IRenderableView {
    * @returns {Promise} Resolved on draw completion.
    */
   draw() {}
-
-  resume() {}
 }
 
 /**
@@ -157,20 +167,27 @@ class IRenderableView {
  */
 class IPDFTextLayerFactory {
   /**
-   * @param {HTMLDivElement} textLayerDiv
-   * @param {number} pageIndex
-   * @param {PageViewport} viewport
-   * @param {boolean} enhanceTextSelection
-   * @param {EventBus} eventBus
+   * @typedef {Object} CreateTextLayerBuilderParameters
+   * @property {HTMLDivElement} textLayerDiv
+   * @property {number} pageIndex
+   * @property {PageViewport} viewport
+   * @property {EventBus} eventBus
+   * @property {TextHighlighter} highlighter
+   * @property {TextAccessibilityManager} [accessibilityManager]
+   */
+
+  /**
+   * @param {CreateTextLayerBuilderParameters}
    * @returns {TextLayerBuilder}
    */
-  createTextLayerBuilder(
+  createTextLayerBuilder({
     textLayerDiv,
     pageIndex,
     viewport,
-    enhanceTextSelection = false,
-    eventBus
-  ) {}
+    eventBus,
+    highlighter,
+    accessibilityManager,
+  }) {}
 }
 
 /**
@@ -178,30 +195,72 @@ class IPDFTextLayerFactory {
  */
 class IPDFAnnotationLayerFactory {
   /**
-   * @param {HTMLDivElement} pageDiv
-   * @param {PDFPage} pdfPage
-   * @param {AnnotationStorage} [annotationStorage] - Storage for annotation
+   * @typedef {Object} CreateAnnotationLayerBuilderParameters
+   * @property {HTMLDivElement} pageDiv
+   * @property {PDFPageProxy} pdfPage
+   * @property {AnnotationStorage} [annotationStorage] - Storage for annotation
    *   data in forms.
-   * @param {string} [imageResourcesPath] - Path for image resources, mainly
+   * @property {string} [imageResourcesPath] - Path for image resources, mainly
    *   for annotation icons. Include trailing slash.
-   * @param {boolean} renderInteractiveForms
-   * @param {IL10n} l10n
-   * @param {boolean} [enableScripting]
-   * @param {Promise<boolean>} [hasJSActionsPromise]
-   * @param {Object} [mouseState]
+   * @property {boolean} renderForms
+   * @property {IL10n} l10n
+   * @property {boolean} [enableScripting]
+   * @property {Promise<boolean>} [hasJSActionsPromise]
+   * @property {Object} [mouseState]
+   * @property {Promise<Object<string, Array<Object>> | null>}
+   *   [fieldObjectsPromise]
+   * @property {Map<string, HTMLCanvasElement>} [annotationCanvasMap] - Map some
+   *   annotation ids with canvases used to render them.
+   * @property {TextAccessibilityManager} [accessibilityManager]
+   */
+
+  /**
+   * @param {CreateAnnotationLayerBuilderParameters}
    * @returns {AnnotationLayerBuilder}
    */
-  createAnnotationLayerBuilder(
+  createAnnotationLayerBuilder({
     pageDiv,
     pdfPage,
     annotationStorage = null,
     imageResourcesPath = "",
-    renderInteractiveForms = true,
+    renderForms = true,
     l10n = undefined,
     enableScripting = false,
     hasJSActionsPromise = null,
-    mouseState = null
-  ) {}
+    mouseState = null,
+    fieldObjectsPromise = null,
+    annotationCanvasMap = null,
+    accessibilityManager = null,
+  }) {}
+}
+
+/**
+ * @interface
+ */
+class IPDFAnnotationEditorLayerFactory {
+  /**
+   * @typedef {Object} CreateAnnotationEditorLayerBuilderParameters
+   * @property {AnnotationEditorUIManager} [uiManager]
+   * @property {HTMLDivElement} pageDiv
+   * @property {PDFPageProxy} pdfPage
+   * @property {IL10n} l10n
+   * @property {AnnotationStorage} [annotationStorage] - Storage for annotation
+   * @property {TextAccessibilityManager} [accessibilityManager]
+   *   data in forms.
+   */
+
+  /**
+   * @param {CreateAnnotationEditorLayerBuilderParameters}
+   * @returns {AnnotationEditorLayerBuilder}
+   */
+  createAnnotationEditorLayerBuilder({
+    uiManager = null,
+    pageDiv,
+    pdfPage,
+    l10n,
+    annotationStorage = null,
+    accessibilityManager,
+  }) {}
 }
 
 /**
@@ -209,11 +268,18 @@ class IPDFAnnotationLayerFactory {
  */
 class IPDFXfaLayerFactory {
   /**
-   * @param {HTMLDivElement} pageDiv
-   * @param {PDFPage} pdfPage
+   * @typedef {Object} CreateXfaLayerBuilderParameters
+   * @property {HTMLDivElement} pageDiv
+   * @property {PDFPageProxy} pdfPage
+   * @property {AnnotationStorage} [annotationStorage] - Storage for annotation
+   *   data in forms.
+   */
+
+  /**
+   * @param {CreateXfaLayerBuilderParameters}
    * @returns {XfaLayerBuilder}
    */
-  createXfaLayerBuilder(pageDiv, pdfPage) {}
+  createXfaLayerBuilder({ pageDiv, pdfPage, annotationStorage = null }) {}
 }
 
 /**
@@ -221,10 +287,48 @@ class IPDFXfaLayerFactory {
  */
 class IPDFStructTreeLayerFactory {
   /**
-   * @param {PDFPage} pdfPage
+   * @typedef {Object} CreateStructTreeLayerBuilderParameters
+   * @property {PDFPageProxy} pdfPage
+   */
+
+  /**
+   * @param {CreateStructTreeLayerBuilderParameters}
    * @returns {StructTreeLayerBuilder}
    */
-  createStructTreeLayerBuilder(pdfPage) {}
+  createStructTreeLayerBuilder({ pdfPage }) {}
+}
+
+/**
+ * @interface
+ */
+class IDownloadManager {
+  /**
+   * @param {string} url
+   * @param {string} filename
+   */
+  downloadUrl(url, filename) {}
+
+  /**
+   * @param {Uint8Array} data
+   * @param {string} filename
+   * @param {string} [contentType]
+   */
+  downloadData(data, filename, contentType) {}
+
+  /**
+   * @param {HTMLElement} element
+   * @param {Uint8Array} data
+   * @param {string} filename
+   * @returns {boolean} Indicating if the data was opened.
+   */
+  openOrDownloadData(element, data, filename) {}
+
+  /**
+   * @param {Blob} blob
+   * @param {string} url
+   * @param {string} filename
+   */
+  download(blob, url, filename) {}
 }
 
 /**
@@ -246,11 +350,11 @@ class IL10n {
    * property bag. If the key was not found, translation falls back to the
    * fallback text.
    * @param {string} key
-   * @param {object} args
-   * @param {string} fallback
+   * @param {Object | null} [args]
+   * @param {string} [fallback]
    * @returns {Promise<string>}
    */
-  async get(key, args, fallback) {}
+  async get(key, args = null, fallback) {}
 
   /**
    * Translates HTML element.
@@ -261,9 +365,10 @@ class IL10n {
 }
 
 export {
+  IDownloadManager,
   IL10n,
+  IPDFAnnotationEditorLayerFactory,
   IPDFAnnotationLayerFactory,
-  IPDFHistory,
   IPDFLinkService,
   IPDFStructTreeLayerFactory,
   IPDFTextLayerFactory,

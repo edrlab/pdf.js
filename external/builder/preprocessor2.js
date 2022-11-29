@@ -1,14 +1,14 @@
 "use strict";
 
 const acorn = require("acorn");
-const escodegen = require("escodegen");
+const escodegen = require("@javascript-obfuscator/escodegen");
 const vm = require("vm");
 const fs = require("fs");
 const path = require("path");
 
 const PDFJS_PREPROCESSOR_NAME = "PDFJSDev";
 const ROOT_PREFIX = "$ROOT/";
-const ACORN_ECMA_VERSION = 2021;
+const ACORN_ECMA_VERSION = 2022;
 
 function isLiteral(obj, value) {
   return obj.type === "Literal" && obj.value === value;
@@ -220,10 +220,11 @@ function postprocessNode(ctx, node) {
           case "BlockStatement":
             // Block statements inside a block are moved to the parent one.
             const subChildren = node.body[subExpressionIndex].body;
-            Array.prototype.splice.apply(
-              node.body,
-              [subExpressionIndex, 1].concat(subChildren)
-            );
+            Array.prototype.splice.apply(node.body, [
+              subExpressionIndex,
+              1,
+              ...subChildren,
+            ]);
             subExpressionIndex += Math.max(subChildren.length - 1, 0);
             continue;
           case "ReturnStatement":

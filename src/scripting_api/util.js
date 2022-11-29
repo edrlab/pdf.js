@@ -59,7 +59,7 @@ class Util extends PDFObject {
       throw new TypeError("First argument of printf must be a string");
     }
 
-    const pattern = /%(,[0-4])?([+ 0#]+)?([0-9]+)?(\.[0-9]+)?(.)/g;
+    const pattern = /%(,[0-4])?([+ 0#]+)?(\d+)?(\.\d+)?(.)/g;
     const PLUS = 1;
     const SPACE = 2;
     const ZERO = 4;
@@ -155,10 +155,11 @@ class Util extends PDFObject {
           }
           if (decPart.length > 2) {
             decPart = `${decimalSep}${decPart.substring(2)}`;
-          } else if (cFlags & HASH) {
-            decPart = ".";
           } else {
-            decPart = "";
+            if (decPart === "1") {
+              intPart += Math.sign(arg);
+            }
+            decPart = cFlags & HASH ? "." : "";
           }
         }
 
@@ -296,6 +297,7 @@ class Util extends PDFObject {
 
   printx(cFormat, cSource) {
     // case
+    cSource = (cSource ?? "").toString();
     const handlers = [x => x, x => x.toUpperCase(), x => x.toLowerCase()];
     const buf = [];
     let i = 0;
@@ -373,6 +375,10 @@ class Util extends PDFObject {
   }
 
   scand(cFormat, cDate) {
+    if (typeof cDate !== "string") {
+      return new Date(cDate);
+    }
+
     if (cDate === "") {
       return new Date();
     }
@@ -406,13 +412,13 @@ class Util extends PDFObject {
           },
         },
         mm: {
-          pattern: `([0-9]{2})`,
+          pattern: `(\\d{2})`,
           action: (value, data) => {
             data.month = parseInt(value) - 1;
           },
         },
         m: {
-          pattern: `([0-9]{1,2})`,
+          pattern: `(\\d{1,2})`,
           action: (value, data) => {
             data.month = parseInt(value) - 1;
           },
@@ -430,73 +436,73 @@ class Util extends PDFObject {
           },
         },
         dd: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.day = parseInt(value);
           },
         },
         d: {
-          pattern: "([0-9]{1,2})",
+          pattern: "(\\d{1,2})",
           action: (value, data) => {
             data.day = parseInt(value);
           },
         },
         yyyy: {
-          pattern: "([0-9]{4})",
+          pattern: "(\\d{4})",
           action: (value, data) => {
             data.year = parseInt(value);
           },
         },
         yy: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.year = 2000 + parseInt(value);
           },
         },
         HH: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.hours = parseInt(value);
           },
         },
         H: {
-          pattern: "([0-9]{1,2})",
+          pattern: "(\\d{1,2})",
           action: (value, data) => {
             data.hours = parseInt(value);
           },
         },
         hh: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.hours = parseInt(value);
           },
         },
         h: {
-          pattern: "([0-9]{1,2})",
+          pattern: "(\\d{1,2})",
           action: (value, data) => {
             data.hours = parseInt(value);
           },
         },
         MM: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.minutes = parseInt(value);
           },
         },
         M: {
-          pattern: "([0-9]{1,2})",
+          pattern: "(\\d{1,2})",
           action: (value, data) => {
             data.minutes = parseInt(value);
           },
         },
         ss: {
-          pattern: "([0-9]{2})",
+          pattern: "(\\d{2})",
           action: (value, data) => {
             data.seconds = parseInt(value);
           },
         },
         s: {
-          pattern: "([0-9]{1,2})",
+          pattern: "(\\d{1,2})",
           action: (value, data) => {
             data.seconds = parseInt(value);
           },
@@ -536,15 +542,15 @@ class Util extends PDFObject {
 
     const [re, actions] = this._scandCache.get(cFormat);
 
-    const matches = new RegExp(re, "g").exec(cDate);
+    const matches = new RegExp(`^${re}$`, "g").exec(cDate);
     if (!matches || matches.length !== actions.length + 1) {
       return null;
     }
 
     const data = {
-      year: 0,
+      year: 2000,
       month: 0,
-      day: 0,
+      day: 1,
       hours: 0,
       minutes: 0,
       seconds: 0,

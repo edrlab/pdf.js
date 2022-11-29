@@ -171,7 +171,7 @@ class BehaviorOverride extends ContentObject {
       this[$content]
         .trim()
         .split(/\s+/)
-        .filter(x => !!x && x.include(":"))
+        .filter(x => x.includes(":"))
         .map(x => x.split(":", 2))
     );
   }
@@ -1005,7 +1005,7 @@ class Rename extends ContentObject {
     // is no colon.
     if (
       this[$content].toLowerCase().startsWith("xml") ||
-      this[$content].match(new RegExp("[\\p{L}_][\\p{L}\\d._\\p{M}-]*", "u"))
+      new RegExp("[\\p{L}_][\\p{L}\\d._\\p{M}-]*", "u").test(this[$content])
     ) {
       warn("XFA - Rename: invalid XFA name");
     }

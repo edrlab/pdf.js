@@ -38,7 +38,7 @@ class FirefoxCom {
    */
   static requestSync(action, data) {
     const request = document.createTextNode("");
-    document.documentElement.appendChild(request);
+    document.documentElement.append(request);
 
     const sender = document.createEvent("CustomEvent");
     sender.initCustomEvent("pdf.js.message", true, false, {
@@ -86,7 +86,7 @@ class FirefoxCom {
         { once: true }
       );
     }
-    document.documentElement.appendChild(request);
+    document.documentElement.append(request);
 
     const sender = document.createEvent("CustomEvent");
     sender.initCustomEvent("pdf.js.message", true, false, {
@@ -100,9 +100,7 @@ class FirefoxCom {
 }
 
 class DownloadManager {
-  constructor() {
-    this._openBlobUrls = new WeakMap();
-  }
+  #openBlobUrls = new WeakMap();
 
   downloadUrl(url, filename) {
     FirefoxCom.request("download", {
@@ -116,13 +114,11 @@ class DownloadManager {
       new Blob([data], { type: contentType })
     );
 
-    FirefoxCom.requestAsync("download", {
+    FirefoxCom.request("download", {
       blobUrl,
       originalUrl: blobUrl,
       filename,
       isAttachment: true,
-    }).then(error => {
-      URL.revokeObjectURL(blobUrl);
     });
   }
 
@@ -134,10 +130,10 @@ class DownloadManager {
     const contentType = isPdfData ? "application/pdf" : "";
 
     if (isPdfData) {
-      let blobUrl = this._openBlobUrls.get(element);
+      let blobUrl = this.#openBlobUrls.get(element);
       if (!blobUrl) {
         blobUrl = URL.createObjectURL(new Blob([data], { type: contentType }));
-        this._openBlobUrls.set(element, blobUrl);
+        this.#openBlobUrls.set(element, blobUrl);
       }
       // Let Firefox's content handler catch the URL and display the PDF.
       const viewerUrl = blobUrl + "#filename=" + encodeURIComponent(filename);
@@ -150,7 +146,7 @@ class DownloadManager {
         // Release the `blobUrl`, since opening it failed, and fallback to
         // downloading the PDF file.
         URL.revokeObjectURL(blobUrl);
-        this._openBlobUrls.delete(element);
+        this.#openBlobUrls.delete(element);
       }
     }
 
@@ -158,21 +154,13 @@ class DownloadManager {
     return false;
   }
 
-  download(blob, url, filename, sourceEventType = "download") {
+  download(blob, url, filename) {
     const blobUrl = URL.createObjectURL(blob);
 
-    FirefoxCom.requestAsync("download", {
+    FirefoxCom.request("download", {
       blobUrl,
       originalUrl: url,
       filename,
-      sourceEventType,
-    }).then(error => {
-      if (error) {
-        // If downloading failed in `PdfStreamConverter.jsm` it's very unlikely
-        // that attempting to fallback and re-download would be helpful here.
-        console.error("`ChromeActions.download` failed.");
-      }
-      URL.revokeObjectURL(blobUrl);
     });
   }
 }
@@ -218,7 +206,10 @@ class MozL10n {
     "findcasesensitivitychange",
     "findentirewordchange",
     "findbarclose",
+    "finddiacriticmatchingchange",
   ];
+  const findLen = "find".length;
+
   const handleEvent = function ({ type, detail }) {
     if (!PDFViewerApplication.initialized) {
       return;
@@ -229,13 +220,14 @@ class MozL10n {
     }
     PDFViewerApplication.eventBus.dispatch("find", {
       source: window,
-      type: type.substring("find".length),
+      type: type.substring(findLen),
       query: detail.query,
       phraseSearch: true,
       caseSensitive: !!detail.caseSensitive,
       entireWord: !!detail.entireWord,
       highlightAll: !!detail.highlightAll,
       findPrevious: !!detail.findPrevious,
+      matchDiacritics: !!detail.matchDiacritics,
     });
   };
 
@@ -271,10 +263,24 @@ class MozL10n {
     if (!PDFViewerApplication.initialized) {
       return;
     }
-    PDFViewerApplication.eventBus.dispatch(type, { source: window });
+    PDFViewerApplication.eventBus.dispatch("download", { source: window });
   };
 
   window.addEventListener("save", handleEvent);
+})();
+
+(function listenEditingEvent() {
+  const handleEvent = function ({ detail }) {
+    if (!PDFViewerApplication.initialized) {
+      return;
+    }
+    PDFViewerApplication.eventBus.dispatch("editingaction", {
+      source: window,
+      name: detail.name,
+    });
+  };
+
+  window.addEventListener("editingaction", handleEvent);
 })();
 
 class FirefoxComDataRangeTransport extends PDFDataRangeTransport {
@@ -330,6 +336,10 @@ class FirefoxExternalServices extends DefaultExternalServices {
       }
       switch (args.pdfjsLoadAction) {
         case "supportsRangedLoading":
+          if (args.done && !args.data) {
+            callbacks.onError();
+            break;
+          }
           pdfDataRangeTransport = new FirefoxComDataRangeTransport(
             args.length,
             args.data,
@@ -357,9 +367,7 @@ class FirefoxExternalServices extends DefaultExternalServices {
           pdfDataRangeTransport.onDataProgress(args.loaded, args.total);
           break;
         case "progressiveDone":
-          if (pdfDataRangeTransport) {
-            pdfDataRangeTransport.onDataProgressiveDone();
-          }
+          pdfDataRangeTransport?.onDataProgressiveDone();
           break;
         case "progress":
           callbacks.onProgress(args.loaded, args.total);
@@ -376,10 +384,6 @@ class FirefoxExternalServices extends DefaultExternalServices {
     FirefoxCom.requestSync("initPassiveLoading", null);
   }
 
-  static async fallback(data) {
-    return FirefoxCom.requestAsync("fallback", data);
-  }
-
   static reportTelemetry(data) {
     FirefoxCom.request("reportTelemetry", JSON.stringify(data));
   }
@@ -390,6 +394,10 @@ class FirefoxExternalServices extends DefaultExternalServices {
 
   static createPreferences() {
     return new FirefoxPreferences();
+  }
+
+  static updateEditorStates(data) {
+    FirefoxCom.request("updateEditorStates", data);
   }
 
   static createL10n(options) {
@@ -435,7 +443,7 @@ document.mozL10n.setExternalLocalizerServices({
   },
 
   getStrings(key) {
-    return FirefoxCom.requestSync("getStrings", key);
+    return FirefoxCom.requestSync("getStrings", null);
   },
 });
 
