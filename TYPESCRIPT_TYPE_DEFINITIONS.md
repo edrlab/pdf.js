@@ -1,6 +1,6 @@
-TypeScript type definitions are generated from the `src` folder into the [types](./types) folder at the root of the repository.
+TypeScript type definitions are generated from the `src` folder into the [build/types](./build/types) folder at the root of the repository.
 
-`/PATH/TO/node_modules/.bin/tsc --target ES2020 --allowJS --declaration --outDir ./types --strict --esModuleInterop --forceConsistentCasingInFileNames --emitDeclarationOnly --moduleResolution node src/pdf.js`
+`/PATH/TO/node_modules/.bin/tsc --target ES2020 --allowJS --declaration --outDir ./build/types --strict --esModuleInterop --forceConsistentCasingInFileNames --emitDeclarationOnly --moduleResolution node src/pdf.js`
 
 `gulp types`
 =>
