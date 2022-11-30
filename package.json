@@ -7,6 +7,7 @@
     "@babel/runtime": "^7.20.1",
     "@javascript-obfuscator/escodegen": "2.3.0",
     "acorn": "^8.8.1",
+    "ajv": "^8.8.2",
     "autoprefixer": "^10.4.13",
     "babel-loader": "^9.1.0",
     "caniuse-lite": "^1.0.30001434",
