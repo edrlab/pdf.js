@@ -16,7 +16,7 @@
 // In mozilla-central, this file is loaded as non-module script,
 // so it mustn't have any dependencies.
 
-class SandboxSupportBase {
+export class SandboxSupportBase {
   /**
    * @param {DOMWindow} - win
    */
@@ -62,6 +62,9 @@ class SandboxSupportBase {
    * @param {Array<Object>} args - Arguments of the function.
    */
   callSandboxFunction(name, args) {
+    if (!this.commFun) {
+      return;
+    }
     try {
       args = this.exportValueToSandbox(args);
       this.commFun(name, args);
@@ -180,11 +183,4 @@ class SandboxSupportBase {
       }
     };
   }
-}
-
-if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
-  exports.SandboxSupportBase = SandboxSupportBase;
-} else {
-  /* eslint-disable-next-line no-unused-vars, no-var */
-  var EXPORTED_SYMBOLS = ["SandboxSupportBase"];
 }

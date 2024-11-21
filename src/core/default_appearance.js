@@ -13,16 +13,25 @@
  * limitations under the License.
  */
 
-import { Dict, Name } from "./primitives.js";
 import {
+  codePointIter,
   escapePDFName,
   getRotationMatrix,
   numberToString,
   stringToUTF16HexString,
 } from "./core_utils.js";
-import { LINE_DESCENT_FACTOR, LINE_FACTOR, OPS, warn } from "../shared/util.js";
+import { Dict, Name } from "./primitives.js";
+import {
+  LINE_DESCENT_FACTOR,
+  LINE_FACTOR,
+  OPS,
+  shadow,
+  warn,
+} from "../shared/util.js";
 import { ColorSpace } from "./colorspace.js";
 import { EvaluatorPreprocessor } from "./evaluator.js";
+import { LocalColorSpaceCache } from "./image_utils.js";
+import { PDFFunctionFactory } from "./function.js";
 import { StringStream } from "./stream.js";
 
 class DefaultAppearanceEvaluator extends EvaluatorPreprocessor {
@@ -69,7 +78,7 @@ class DefaultAppearanceEvaluator extends EvaluatorPreprocessor {
           case OPS.setFillGray:
             ColorSpace.singletons.gray.getRgbItem(args, 0, result.fontColor, 0);
             break;
-          case OPS.setFillColorSpace:
+          case OPS.setFillCMYKColor:
             ColorSpace.singletons.cmyk.getRgbItem(args, 0, result.fontColor, 0);
             break;
         }
@@ -85,6 +94,124 @@ class DefaultAppearanceEvaluator extends EvaluatorPreprocessor {
 // Parse DA to extract font and color information.
 function parseDefaultAppearance(str) {
   return new DefaultAppearanceEvaluator(str).parse();
+}
+
+class AppearanceStreamEvaluator extends EvaluatorPreprocessor {
+  constructor(stream, evaluatorOptions, xref) {
+    super(stream);
+    this.stream = stream;
+    this.evaluatorOptions = evaluatorOptions;
+    this.xref = xref;
+
+    this.resources = stream.dict?.get("Resources");
+  }
+
+  parse() {
+    const operation = {
+      fn: 0,
+      args: [],
+    };
+    let result = {
+      scaleFactor: 1,
+      fontSize: 0,
+      fontName: "",
+      fontColor: /* black = */ new Uint8ClampedArray(3),
+      fillColorSpace: ColorSpace.singletons.gray,
+    };
+    let breakLoop = false;
+    const stack = [];
+
+    try {
+      while (true) {
+        operation.args.length = 0; // Ensure that `args` it's always reset.
+
+        if (breakLoop || !this.read(operation)) {
+          break;
+        }
+        const { fn, args } = operation;
+
+        switch (fn | 0) {
+          case OPS.save:
+            stack.push({
+              scaleFactor: result.scaleFactor,
+              fontSize: result.fontSize,
+              fontName: result.fontName,
+              fontColor: result.fontColor.slice(),
+              fillColorSpace: result.fillColorSpace,
+            });
+            break;
+          case OPS.restore:
+            result = stack.pop() || result;
+            break;
+          case OPS.setTextMatrix:
+            result.scaleFactor *= Math.hypot(args[0], args[1]);
+            break;
+          case OPS.setFont:
+            const [fontName, fontSize] = args;
+            if (fontName instanceof Name) {
+              result.fontName = fontName.name;
+            }
+            if (typeof fontSize === "number" && fontSize > 0) {
+              result.fontSize = fontSize * result.scaleFactor;
+            }
+            break;
+          case OPS.setFillColorSpace:
+            result.fillColorSpace = ColorSpace.parse({
+              cs: args[0],
+              xref: this.xref,
+              resources: this.resources,
+              pdfFunctionFactory: this._pdfFunctionFactory,
+              localColorSpaceCache: this._localColorSpaceCache,
+            });
+            break;
+          case OPS.setFillColor:
+            const cs = result.fillColorSpace;
+            cs.getRgbItem(args, 0, result.fontColor, 0);
+            break;
+          case OPS.setFillRGBColor:
+            ColorSpace.singletons.rgb.getRgbItem(args, 0, result.fontColor, 0);
+            break;
+          case OPS.setFillGray:
+            ColorSpace.singletons.gray.getRgbItem(args, 0, result.fontColor, 0);
+            break;
+          case OPS.setFillCMYKColor:
+            ColorSpace.singletons.cmyk.getRgbItem(args, 0, result.fontColor, 0);
+            break;
+          case OPS.showText:
+          case OPS.showSpacedText:
+          case OPS.nextLineShowText:
+          case OPS.nextLineSetSpacingShowText:
+            breakLoop = true;
+            break;
+        }
+      }
+    } catch (reason) {
+      warn(`parseAppearanceStream - ignoring errors: "${reason}".`);
+    }
+    this.stream.reset();
+    delete result.scaleFactor;
+    delete result.fillColorSpace;
+
+    return result;
+  }
+
+  get _localColorSpaceCache() {
+    return shadow(this, "_localColorSpaceCache", new LocalColorSpaceCache());
+  }
+
+  get _pdfFunctionFactory() {
+    const pdfFunctionFactory = new PDFFunctionFactory({
+      xref: this.xref,
+      isEvalSupported: this.evaluatorOptions.isEvalSupported,
+    });
+    return shadow(this, "_pdfFunctionFactory", pdfFunctionFactory);
+  }
+}
+
+// Parse appearance stream to extract font and color information.
+// It returns the font properties used to render the first text object.
+function parseAppearanceStream(stream, evaluatorOptions, xref) {
+  return new AppearanceStreamEvaluator(stream, evaluatorOptions, xref).parse();
 }
 
 function getPdfColor(color, isFill) {
@@ -115,7 +242,7 @@ class FakeUnicodeFont {
     this.fontFamily = fontFamily;
 
     const canvas = new OffscreenCanvas(1, 1);
-    this.ctxMeasure = canvas.getContext("2d");
+    this.ctxMeasure = canvas.getContext("2d", { willReadFrequently: true });
 
     if (!FakeUnicodeFont._fontNameId) {
       FakeUnicodeFont._fontNameId = 1;
@@ -123,35 +250,6 @@ class FakeUnicodeFont {
     this.fontName = Name.get(
       `InvalidPDFjsFont_${fontFamily}_${FakeUnicodeFont._fontNameId++}`
     );
-  }
-
-  get toUnicodeRef() {
-    if (!FakeUnicodeFont._toUnicodeRef) {
-      const toUnicode = `/CIDInit /ProcSet findresource begin
-12 dict begin
-begincmap
-/CIDSystemInfo
-<< /Registry (Adobe)
-/Ordering (UCS) /Supplement 0 >> def
-/CMapName /Adobe-Identity-UCS def
-/CMapType 2 def
-1 begincodespacerange
-<0000> <FFFF>
-endcodespacerange
-1 beginbfrange
-<0000> <FFFF> <0000>
-endbfrange
-endcmap CMapName currentdict /CMap defineresource pop end end`;
-      const toUnicodeStream = (FakeUnicodeFont.toUnicodeStream =
-        new StringStream(toUnicode));
-      const toUnicodeDict = new Dict(this.xref);
-      toUnicodeStream.dict = toUnicodeDict;
-      toUnicodeDict.set("Length", toUnicode.length);
-      FakeUnicodeFont._toUnicodeRef =
-        this.xref.getNewPersistentRef(toUnicodeStream);
-    }
-
-    return FakeUnicodeFont._toUnicodeRef;
   }
 
   get fontDescriptorRef() {
@@ -224,7 +322,7 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
     baseFont.set("Subtype", Name.get("Type0"));
     baseFont.set("Encoding", Name.get("Identity-H"));
     baseFont.set("DescendantFonts", [this.descendantFontRef]);
-    baseFont.set("ToUnicode", this.toUnicodeRef);
+    baseFont.set("ToUnicode", Name.get("Identity-H"));
 
     return this.xref.getNewPersistentRef(baseFont);
   }
@@ -264,7 +362,27 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
     return this.resources;
   }
 
-  createAppearance(text, rect, rotation, fontSize, bgColor) {
+  static getFirstPositionInfo(rect, rotation, fontSize) {
+    // Get the position of the first char in the rect.
+    const [x1, y1, x2, y2] = rect;
+    let w = x2 - x1;
+    let h = y2 - y1;
+
+    if (rotation % 180 !== 0) {
+      [w, h] = [h, w];
+    }
+    const lineHeight = LINE_FACTOR * fontSize;
+    const lineDescent = LINE_DESCENT_FACTOR * fontSize;
+
+    return {
+      coords: [0, h + lineDescent - lineHeight],
+      bbox: [0, 0, w, h],
+      matrix:
+        rotation !== 0 ? getRotationMatrix(rotation, h, lineHeight) : undefined,
+    };
+  }
+
+  createAppearance(text, rect, rotation, fontSize, bgColor, strokeAlpha) {
     const ctx = this._createContext();
     const lines = [];
     let maxWidth = -Infinity;
@@ -274,8 +392,8 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
       // languages, like arabic, it'd be wrong because of ligatures.
       const lineWidth = ctx.measureText(line).width;
       maxWidth = Math.max(maxWidth, lineWidth);
-      for (const char of line.split("")) {
-        const code = char.charCodeAt(0);
+      for (const code of codePointIter(line)) {
+        const char = String.fromCodePoint(code);
         let width = this.widths.get(code);
         if (width === undefined) {
           const metrics = ctx.measureText(char);
@@ -321,6 +439,23 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
       `/${this.fontName.name} ${numberToString(newFontSize)} Tf`,
     ];
 
+    const { resources } = this;
+    strokeAlpha =
+      typeof strokeAlpha === "number" && strokeAlpha >= 0 && strokeAlpha <= 1
+        ? strokeAlpha
+        : 1;
+
+    if (strokeAlpha !== 1) {
+      buffer.push("/R0 gs");
+      const extGState = new Dict(this.xref);
+      const r0 = new Dict(this.xref);
+      r0.set("ca", strokeAlpha);
+      r0.set("CA", strokeAlpha);
+      r0.set("Type", Name.get("ExtGState"));
+      extGState.set("R0", r0);
+      resources.set("ExtGState", extGState);
+    }
+
     const vShift = numberToString(lineHeight);
     for (const line of lines) {
       buffer.push(`0 -${vShift} Td <${stringToUTF16HexString(line)}> Tj`);
@@ -333,7 +468,7 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
     appearanceStreamDict.set("Type", Name.get("XObject"));
     appearanceStreamDict.set("BBox", [0, 0, w, h]);
     appearanceStreamDict.set("Length", appearance.length);
-    appearanceStreamDict.set("Resources", this.resources);
+    appearanceStreamDict.set("Resources", resources);
 
     if (rotation) {
       const matrix = getRotationMatrix(rotation, w, h);
@@ -351,5 +486,6 @@ export {
   createDefaultAppearance,
   FakeUnicodeFont,
   getPdfColor,
+  parseAppearanceStream,
   parseDefaultAppearance,
 };

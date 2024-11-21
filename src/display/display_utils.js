@@ -14,16 +14,14 @@
  */
 
 import {
-  BaseCanvasFactory,
-  BaseCMapReaderFactory,
-  BaseStandardFontDataFactory,
-  BaseSVGFactory,
-} from "./base_factory.js";
-import { BaseException, stringToBytes, Util, warn } from "../shared/util.js";
+  BaseException,
+  FeatureTest,
+  shadow,
+  Util,
+  warn,
+} from "../shared/util.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-const AnnotationPrefix = "pdfjs_internal_id_";
 
 class PixelsPerInch {
   static CSS = 96.0;
@@ -33,24 +31,7 @@ class PixelsPerInch {
   static PDF_TO_CSS_UNITS = this.CSS / this.PDF;
 }
 
-class DOMCanvasFactory extends BaseCanvasFactory {
-  constructor({ ownerDocument = globalThis.document } = {}) {
-    super();
-    this._document = ownerDocument;
-  }
-
-  /**
-   * @ignore
-   */
-  _createCanvas(width, height) {
-    const canvas = this._document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    return canvas;
-  }
-}
-
-async function fetchData(url, asTypedArray = false) {
+async function fetchData(url, type = "text") {
   if (
     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
     isValidFetchUrl(url, document.baseURI)
@@ -59,69 +40,43 @@ async function fetchData(url, asTypedArray = false) {
     if (!response.ok) {
       throw new Error(response.statusText);
     }
-    return asTypedArray
-      ? new Uint8Array(await response.arrayBuffer())
-      : stringToBytes(await response.text());
+    switch (type) {
+      case "arraybuffer":
+        return response.arrayBuffer();
+      case "blob":
+        return response.blob();
+      case "json":
+        return response.json();
+    }
+    return response.text();
   }
 
   // The Fetch API is not supported.
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("GET", url, /* asTypedArray = */ true);
+    request.open("GET", url, /* async = */ true);
+    request.responseType = type;
 
-    if (asTypedArray) {
-      request.responseType = "arraybuffer";
-    }
     request.onreadystatechange = () => {
       if (request.readyState !== XMLHttpRequest.DONE) {
         return;
       }
       if (request.status === 200 || request.status === 0) {
-        let data;
-        if (asTypedArray && request.response) {
-          data = new Uint8Array(request.response);
-        } else if (!asTypedArray && request.responseText) {
-          data = stringToBytes(request.responseText);
+        switch (type) {
+          case "arraybuffer":
+          case "blob":
+          case "json":
+            resolve(request.response);
+            return;
         }
-        if (data) {
-          resolve(data);
-          return;
-        }
+        resolve(request.responseText);
+        return;
       }
       reject(new Error(request.statusText));
     };
 
     request.send(null);
   });
-}
-
-class DOMCMapReaderFactory extends BaseCMapReaderFactory {
-  /**
-   * @ignore
-   */
-  _fetchData(url, compressionType) {
-    return fetchData(url, /* asTypedArray = */ this.isCompressed).then(data => {
-      return { cMapData: data, compressionType };
-    });
-  }
-}
-
-class DOMStandardFontDataFactory extends BaseStandardFontDataFactory {
-  /**
-   * @ignore
-   */
-  _fetchData(url) {
-    return fetchData(url, /* asTypedArray = */ true);
-  }
-}
-
-class DOMSVGFactory extends BaseSVGFactory {
-  /**
-   * @ignore
-   */
-  _createSVG(type) {
-    return document.createElementNS(SVG_NS, type);
-  }
 }
 
 /**
@@ -224,13 +179,13 @@ class PageViewport {
     if (rotateA === 0) {
       offsetCanvasX = Math.abs(centerY - viewBox[1]) * scale + offsetX;
       offsetCanvasY = Math.abs(centerX - viewBox[0]) * scale + offsetY;
-      width = Math.abs(viewBox[3] - viewBox[1]) * scale;
-      height = Math.abs(viewBox[2] - viewBox[0]) * scale;
+      width = (viewBox[3] - viewBox[1]) * scale;
+      height = (viewBox[2] - viewBox[0]) * scale;
     } else {
       offsetCanvasX = Math.abs(centerX - viewBox[0]) * scale + offsetX;
       offsetCanvasY = Math.abs(centerY - viewBox[1]) * scale + offsetY;
-      width = Math.abs(viewBox[2] - viewBox[0]) * scale;
-      height = Math.abs(viewBox[3] - viewBox[1]) * scale;
+      width = (viewBox[2] - viewBox[0]) * scale;
+      height = (viewBox[3] - viewBox[1]) * scale;
     }
     // creating transform for the following operations:
     // translate(-centerX, -centerY), rotate and flip vertically,
@@ -246,6 +201,20 @@ class PageViewport {
 
     this.width = width;
     this.height = height;
+  }
+
+  /**
+   * The original, un-scaled, viewport dimensions.
+   * @type {Object}
+   */
+  get rawDims() {
+    const { viewBox } = this;
+    return shadow(this, "rawDims", {
+      pageWidth: viewBox[2] - viewBox[0],
+      pageHeight: viewBox[3] - viewBox[1],
+      pageX: viewBox[0],
+      pageY: viewBox[1],
+    });
   }
 
   /**
@@ -275,7 +244,7 @@ class PageViewport {
    * converting PDF location into canvas pixel coordinates.
    * @param {number} x - The x-coordinate.
    * @param {number} y - The y-coordinate.
-   * @returns {Object} Object containing `x` and `y` properties of the
+   * @returns {Array} Array containing `x`- and `y`-coordinates of the
    *   point in the viewport coordinate space.
    * @see {@link convertToPdfPoint}
    * @see {@link convertToViewportRectangle}
@@ -302,7 +271,7 @@ class PageViewport {
    * for converting canvas pixel location into PDF one.
    * @param {number} x - The x-coordinate.
    * @param {number} y - The y-coordinate.
-   * @returns {Object} Object containing `x` and `y` properties of the
+   * @returns {Array} Array containing `x`- and `y`-coordinates of the
    *   point in the PDF coordinate space.
    * @see {@link convertToViewportPoint}
    */
@@ -312,9 +281,9 @@ class PageViewport {
 }
 
 class RenderingCancelledException extends BaseException {
-  constructor(msg, type) {
+  constructor(msg, extraDelay = 0) {
     super(msg, "RenderingCancelledException");
-    this.type = type;
+    this.extraDelay = extraDelay;
   }
 }
 
@@ -334,13 +303,10 @@ function isPdfFile(filename) {
 /**
  * Gets the filename from a given URL.
  * @param {string} url
- * @param {boolean} [onlyStripPath]
  * @returns {string}
  */
-function getFilenameFromUrl(url, onlyStripPath = false) {
-  if (!onlyStripPath) {
-    [url] = url.split(/[#?]/, 1);
-  }
+function getFilenameFromUrl(url) {
+  [url] = url.split(/[#?]/, 1);
   return url.substring(url.lastIndexOf("/") + 1);
 }
 
@@ -376,7 +342,7 @@ function getPdfFilenameFromUrl(url, defaultFilename = "document.pdf") {
         suggestedFilename = reFilename.exec(
           decodeURIComponent(suggestedFilename)
         )[0];
-      } catch (ex) {
+      } catch {
         // Possible (extremely rare) errors:
         // URIError "Malformed URI", e.g. for "%AA.pdf"
         // TypeError "null has no properties", e.g. for "%2F.pdf"
@@ -426,46 +392,34 @@ class StatTimer {
 }
 
 function isValidFetchUrl(url, baseUrl) {
+  if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+    throw new Error("Not implemented: isValidFetchUrl");
+  }
   try {
     const { protocol } = baseUrl ? new URL(url, baseUrl) : new URL(url);
     // The Fetch API only supports the http/https protocols, and not file/ftp.
     return protocol === "http:" || protocol === "https:";
-  } catch (ex) {
+  } catch {
     return false; // `new URL()` will throw on incorrect data.
   }
 }
 
 /**
- * @param {string} src
- * @param {boolean} [removeScriptElement]
- * @returns {Promise<void>}
+ * Event handler to suppress context menu.
  */
-function loadScript(src, removeScriptElement = false) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-
-    script.onload = function (evt) {
-      if (removeScriptElement) {
-        script.remove();
-      }
-      resolve(evt);
-    };
-    script.onerror = function () {
-      reject(new Error(`Cannot load script at: ${script.src}`));
-    };
-    (document.head || document.documentElement).append(script);
-  });
+function noContextMenu(e) {
+  e.preventDefault();
 }
 
 // Deprecated API function -- display regardless of the `verbosity` setting.
 function deprecated(details) {
+  // eslint-disable-next-line no-console
   console.log("Deprecated API usage: " + details);
 }
 
-let pdfDateStringRegex;
-
 class PDFDateString {
+  static #regex;
+
   /**
    * Convert a PDF date string to a JavaScript `Date` object.
    *
@@ -488,27 +442,25 @@ class PDFDateString {
     }
 
     // Lazily initialize the regular expression.
-    if (!pdfDateStringRegex) {
-      pdfDateStringRegex = new RegExp(
-        "^D:" + // Prefix (required)
-          "(\\d{4})" + // Year (required)
-          "(\\d{2})?" + // Month (optional)
-          "(\\d{2})?" + // Day (optional)
-          "(\\d{2})?" + // Hour (optional)
-          "(\\d{2})?" + // Minute (optional)
-          "(\\d{2})?" + // Second (optional)
-          "([Z|+|-])?" + // Universal time relation (optional)
-          "(\\d{2})?" + // Offset hour (optional)
-          "'?" + // Splitting apostrophe (optional)
-          "(\\d{2})?" + // Offset minute (optional)
-          "'?" // Trailing apostrophe (optional)
-      );
-    }
+    this.#regex ||= new RegExp(
+      "^D:" + // Prefix (required)
+        "(\\d{4})" + // Year (required)
+        "(\\d{2})?" + // Month (optional)
+        "(\\d{2})?" + // Day (optional)
+        "(\\d{2})?" + // Hour (optional)
+        "(\\d{2})?" + // Minute (optional)
+        "(\\d{2})?" + // Second (optional)
+        "([Z|+|-])?" + // Universal time relation (optional)
+        "(\\d{2})?" + // Offset hour (optional)
+        "'?" + // Splitting apostrophe (optional)
+        "(\\d{2})?" + // Offset minute (optional)
+        "'?" // Trailing apostrophe (optional)
+    );
 
     // Optional fields that don't satisfy the requirements from the regular
     // expression (such as incorrect digit counts or numbers that are out of
     // range) will fall back the defaults from the specification.
-    const matches = pdfDateStringRegex.exec(input);
+    const matches = this.#regex.exec(input);
     if (!matches) {
       return null;
     }
@@ -614,13 +566,79 @@ function getCurrentTransformInverse(ctx) {
   return [a, b, c, d, e, f];
 }
 
+/**
+ * @param {HTMLDivElement} div
+ * @param {PageViewport} viewport
+ * @param {boolean} mustFlip
+ * @param {boolean} mustRotate
+ */
+function setLayerDimensions(
+  div,
+  viewport,
+  mustFlip = false,
+  mustRotate = true
+) {
+  if (viewport instanceof PageViewport) {
+    const { pageWidth, pageHeight } = viewport.rawDims;
+    const { style } = div;
+    const useRound = FeatureTest.isCSSRoundSupported;
+
+    const w = `var(--scale-factor) * ${pageWidth}px`,
+      h = `var(--scale-factor) * ${pageHeight}px`;
+    const widthStr = useRound
+        ? `round(down, ${w}, var(--scale-round-x, 1px))`
+        : `calc(${w})`,
+      heightStr = useRound
+        ? `round(down, ${h}, var(--scale-round-y, 1px))`
+        : `calc(${h})`;
+
+    if (!mustFlip || viewport.rotation % 180 === 0) {
+      style.width = widthStr;
+      style.height = heightStr;
+    } else {
+      style.width = heightStr;
+      style.height = widthStr;
+    }
+  }
+
+  if (mustRotate) {
+    div.setAttribute("data-main-rotation", viewport.rotation);
+  }
+}
+
+/**
+ * Scale factors for the canvas, necessary with HiDPI displays.
+ */
+class OutputScale {
+  constructor() {
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    /**
+     * @type {number} Horizontal scale.
+     */
+    this.sx = pixelRatio;
+
+    /**
+     * @type {number} Vertical scale.
+     */
+    this.sy = pixelRatio;
+  }
+
+  /**
+   * @type {boolean} Returns `true` when scaling is required, `false` otherwise.
+   */
+  get scaled() {
+    return this.sx !== 1 || this.sy !== 1;
+  }
+
+  get symmetric() {
+    return this.sx === this.sy;
+  }
+}
+
 export {
-  AnnotationPrefix,
   deprecated,
-  DOMCanvasFactory,
-  DOMCMapReaderFactory,
-  DOMStandardFontDataFactory,
-  DOMSVGFactory,
+  fetchData,
   getColorValues,
   getCurrentTransform,
   getCurrentTransformInverse,
@@ -631,10 +649,13 @@ export {
   isDataScheme,
   isPdfFile,
   isValidFetchUrl,
-  loadScript,
+  noContextMenu,
+  OutputScale,
   PageViewport,
   PDFDateString,
   PixelsPerInch,
   RenderingCancelledException,
+  setLayerDimensions,
   StatTimer,
+  SVG_NS,
 };

@@ -13,53 +13,30 @@
  * limitations under the License.
  */
 
+import { assert, isNodeJS } from "../../src/shared/util.js";
 import { NullStream, StringStream } from "../../src/core/stream.js";
 import { Page, PDFDocument } from "../../src/core/document.js";
-import { assert } from "../../src/shared/util.js";
-import { DocStats } from "../../src/core/core_utils.js";
-import { isNodeJS } from "../../src/shared/is_node.js";
+import { fetchData as fetchDataDOM } from "../../src/display/display_utils.js";
+import { fetchData as fetchDataNode } from "../../src/display/node_utils.js";
 import { Ref } from "../../src/core/primitives.js";
 
 const TEST_PDFS_PATH = isNodeJS ? "./test/pdfs/" : "../pdfs/";
 
-const CMAP_PARAMS = {
-  cMapUrl: isNodeJS ? "./external/bcmaps/" : "../../external/bcmaps/",
-  cMapPacked: true,
-};
+const CMAP_URL = isNodeJS ? "./external/bcmaps/" : "../../external/bcmaps/";
 
 const STANDARD_FONT_DATA_URL = isNodeJS
   ? "./external/standard_fonts/"
   : "../../external/standard_fonts/";
 
-class DOMFileReaderFactory {
+class DefaultFileReaderFactory {
   static async fetch(params) {
-    const response = await fetch(params.path);
-    if (!response.ok) {
-      throw new Error(response.statusText);
+    if (isNodeJS) {
+      return fetchDataNode(params.path);
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const data = await fetchDataDOM(params.path, /* type = */ "arraybuffer");
+    return new Uint8Array(data);
   }
 }
-
-class NodeFileReaderFactory {
-  static async fetch(params) {
-    const fs = require("fs");
-
-    return new Promise((resolve, reject) => {
-      fs.readFile(params.path, (error, data) => {
-        if (error || !data) {
-          reject(error || new Error(`Empty file for: ${params.path}`));
-          return;
-        }
-        resolve(new Uint8Array(data));
-      });
-    });
-  }
-}
-
-const DefaultFileReaderFactory = isNodeJS
-  ? NodeFileReaderFactory
-  : DOMFileReaderFactory;
 
 function buildGetDocumentParams(filename, options) {
   const params = Object.create(null);
@@ -77,7 +54,6 @@ function buildGetDocumentParams(filename, options) {
 class XRefMock {
   constructor(array) {
     this._map = Object.create(null);
-    this.stats = new DocStats({ send: () => {} });
     this._newTemporaryRefNum = null;
     this._newPersistentRefNum = null;
     this.stream = new NullStream();
@@ -146,20 +122,58 @@ function createIdFactory(pageIndex) {
   return page._localIdFactory;
 }
 
-function isEmptyObj(obj) {
-  assert(
-    typeof obj === "object" && obj !== null,
-    "isEmptyObj - invalid argument."
-  );
-  return Object.keys(obj).length === 0;
+function createTemporaryNodeServer() {
+  assert(isNodeJS, "Should only be used in Node.js environments.");
+
+  const fs = process.getBuiltinModule("fs"),
+    http = process.getBuiltinModule("http");
+  // Create http server to serve pdf data for tests.
+  const server = http
+    .createServer((request, response) => {
+      const filePath = process.cwd() + "/test/pdfs" + request.url;
+      fs.promises.lstat(filePath).then(
+        stat => {
+          if (!request.headers.range) {
+            const contentLength = stat.size;
+            const stream = fs.createReadStream(filePath);
+            response.writeHead(200, {
+              "Content-Type": "application/pdf",
+              "Content-Length": contentLength,
+              "Accept-Ranges": "bytes",
+            });
+            stream.pipe(response);
+          } else {
+            const [start, end] = request.headers.range
+              .split("=")[1]
+              .split("-")
+              .map(x => Number(x));
+            const stream = fs.createReadStream(filePath, { start, end });
+            response.writeHead(206, {
+              "Content-Type": "application/pdf",
+            });
+            stream.pipe(response);
+          }
+        },
+        error => {
+          response.writeHead(404);
+          response.end(`File ${request.url} not found!`);
+        }
+      );
+    })
+    .listen(0); /* Listen on a random free port */
+
+  return {
+    server,
+    port: server.address().port,
+  };
 }
 
 export {
   buildGetDocumentParams,
-  CMAP_PARAMS,
+  CMAP_URL,
   createIdFactory,
+  createTemporaryNodeServer,
   DefaultFileReaderFactory,
-  isEmptyObj,
   STANDARD_FONT_DATA_URL,
   TEST_PDFS_PATH,
   XRefMock,

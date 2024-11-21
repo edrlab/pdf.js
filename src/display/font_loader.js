@@ -15,27 +15,27 @@
 
 import {
   assert,
-  bytesToString,
-  FeatureTest,
+  FontRenderOps,
+  isNodeJS,
   shadow,
   string32,
-  UNSUPPORTED_FEATURES,
+  toBase64Util,
+  unreachable,
   warn,
 } from "../shared/util.js";
-import { isNodeJS } from "../shared/is_node.js";
 
 class FontLoader {
+  #systemFonts = new Set();
+
   constructor({
-    onUnsupportedFeature,
     ownerDocument = globalThis.document,
     styleElement = null, // For testing only.
   }) {
-    this._onUnsupportedFeature = onUnsupportedFeature;
     this._document = ownerDocument;
 
-    this.nativeFontFaces = [];
+    this.nativeFontFaces = new Set();
     this.styleElement =
-      typeof PDFJSDev === "undefined" || PDFJSDev.test("!PRODUCTION || TESTING")
+      typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")
         ? styleElement
         : null;
 
@@ -46,8 +46,13 @@ class FontLoader {
   }
 
   addNativeFontFace(nativeFontFace) {
-    this.nativeFontFaces.push(nativeFontFace);
+    this.nativeFontFaces.add(nativeFontFace);
     this._document.fonts.add(nativeFontFace);
+  }
+
+  removeNativeFontFace(nativeFontFace) {
+    this.nativeFontFaces.delete(nativeFontFace);
+    this._document.fonts.delete(nativeFontFace);
   }
 
   insertRule(rule) {
@@ -65,7 +70,8 @@ class FontLoader {
     for (const nativeFontFace of this.nativeFontFaces) {
       this._document.fonts.delete(nativeFontFace);
     }
-    this.nativeFontFaces.length = 0;
+    this.nativeFontFaces.clear();
+    this.#systemFonts.clear();
 
     if (this.styleElement) {
       // Note: ChildNode.remove doesn't throw if the parentNode is undefined.
@@ -74,12 +80,49 @@ class FontLoader {
     }
   }
 
+  async loadSystemFont({ systemFontInfo: info, _inspectFont }) {
+    if (!info || this.#systemFonts.has(info.loadedName)) {
+      return;
+    }
+    assert(
+      !this.disableFontFace,
+      "loadSystemFont shouldn't be called when `disableFontFace` is set."
+    );
+
+    if (this.isFontLoadingAPISupported) {
+      const { loadedName, src, style } = info;
+      const fontFace = new FontFace(loadedName, src, style);
+      this.addNativeFontFace(fontFace);
+      try {
+        await fontFace.load();
+        this.#systemFonts.add(loadedName);
+        _inspectFont?.(info);
+      } catch {
+        warn(
+          `Cannot load system font: ${info.baseFontName}, installing it could help to improve PDF rendering.`
+        );
+
+        this.removeNativeFontFace(fontFace);
+      }
+      return;
+    }
+
+    unreachable(
+      "Not implemented: loadSystemFont without the Font Loading API."
+    );
+  }
+
   async bind(font) {
     // Add the font to the DOM only once; skip if the font is already loaded.
-    if (font.attached || font.missingFile) {
+    if (font.attached || (font.missingFile && !font.systemFontInfo)) {
       return;
     }
     font.attached = true;
+
+    if (font.systemFontInfo) {
+      await this.loadSystemFont(font);
+      return;
+    }
 
     if (this.isFontLoadingAPISupported) {
       const nativeFontFace = font.createNativeFontFace();
@@ -88,9 +131,6 @@ class FontLoader {
         try {
           await nativeFontFace.loaded;
         } catch (ex) {
-          this._onUnsupportedFeature({
-            featureId: UNSUPPORTED_FEATURES.errorFontLoadNative,
-          });
           warn(`Failed to load font '${nativeFontFace.family}': '${ex}'.`);
 
           // When font loading failed, fall back to the built-in font renderer.
@@ -122,10 +162,7 @@ class FontLoader {
 
   get isFontLoadingAPISupported() {
     const hasFonts = !!this._document?.fonts;
-    if (
-      typeof PDFJSDev === "undefined" ||
-      PDFJSDev.test("!PRODUCTION || TESTING")
-    ) {
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
       return shadow(
         this,
         "isFontLoadingAPISupported",
@@ -147,6 +184,7 @@ class FontLoader {
         supported = true;
       } else if (
         typeof navigator !== "undefined" &&
+        typeof navigator?.userAgent === "string" &&
         // User agent string sniffing is bad, but there is no reliable way to
         // tell if the font is fully loaded and ready to be used with canvas.
         /Mozilla\/5.0.*?rv:\d+.*? Gecko/.test(navigator.userAgent)
@@ -322,26 +360,14 @@ class FontLoader {
 }
 
 class FontFaceObject {
-  constructor(
-    translatedData,
-    {
-      isEvalSupported = true,
-      disableFontFace = false,
-      ignoreErrors = false,
-      onUnsupportedFeature,
-      fontRegistry = null,
-    }
-  ) {
+  constructor(translatedData, { disableFontFace = false, inspectFont = null }) {
     this.compiledGlyphs = Object.create(null);
     // importing translated data
     for (const i in translatedData) {
       this[i] = translatedData[i];
     }
-    this.isEvalSupported = isEvalSupported !== false;
     this.disableFontFace = disableFontFace === true;
-    this.ignoreErrors = ignoreErrors === true;
-    this._onUnsupportedFeature = onUnsupportedFeature;
-    this.fontRegistry = fontRegistry;
+    this._inspectFont = inspectFont;
   }
 
   createNativeFontFace() {
@@ -365,7 +391,7 @@ class FontFaceObject {
       );
     }
 
-    this.fontRegistry?.registerFont(this);
+    this._inspectFont?.(this);
     return nativeFontFace;
   }
 
@@ -373,9 +399,8 @@ class FontFaceObject {
     if (!this.data || this.disableFontFace) {
       return null;
     }
-    const data = bytesToString(this.data);
     // Add the @font-face rule to the document.
-    const url = `url(data:${this.mimetype};base64,${btoa(data)});`;
+    const url = `url(data:${this.mimetype};base64,${toBase64Util(this.data)});`;
     let rule;
     if (!this.cssFontInfo) {
       rule = `@font-face {font-family:"${this.loadedName}";src:${url}}`;
@@ -387,7 +412,7 @@ class FontFaceObject {
       rule = `@font-face {font-family:"${this.cssFontInfo.fontFamily}";${css}src:${url}}`;
     }
 
-    this.fontRegistry?.registerFont(this, url);
+    this._inspectFont?.(this, url);
     return rule;
   }
 
@@ -400,42 +425,89 @@ class FontFaceObject {
     try {
       cmds = objs.get(this.loadedName + "_path_" + character);
     } catch (ex) {
-      if (!this.ignoreErrors) {
-        throw ex;
-      }
-      this._onUnsupportedFeature({
-        featureId: UNSUPPORTED_FEATURES.errorFontGetPath,
-      });
       warn(`getPathGenerator - ignoring character: "${ex}".`);
+    }
 
+    if (!Array.isArray(cmds) || cmds.length === 0) {
       return (this.compiledGlyphs[character] = function (c, size) {
         // No-op function, to allow rendering to continue.
       });
     }
 
-    // If we can, compile cmds into JS for MAXIMUM SPEED...
-    if (this.isEvalSupported && FeatureTest.isEvalSupported) {
-      const jsBuf = [];
-      for (const current of cmds) {
-        const args = current.args !== undefined ? current.args.join(",") : "";
-        jsBuf.push("c.", current.cmd, "(", args, ");\n");
+    const commands = [];
+    for (let i = 0, ii = cmds.length; i < ii; ) {
+      switch (cmds[i++]) {
+        case FontRenderOps.BEZIER_CURVE_TO:
+          {
+            const [a, b, c, d, e, f] = cmds.slice(i, i + 6);
+            commands.push(ctx => ctx.bezierCurveTo(a, b, c, d, e, f));
+            i += 6;
+          }
+          break;
+        case FontRenderOps.MOVE_TO:
+          {
+            const [a, b] = cmds.slice(i, i + 2);
+            commands.push(ctx => ctx.moveTo(a, b));
+            i += 2;
+          }
+          break;
+        case FontRenderOps.LINE_TO:
+          {
+            const [a, b] = cmds.slice(i, i + 2);
+            commands.push(ctx => ctx.lineTo(a, b));
+            i += 2;
+          }
+          break;
+        case FontRenderOps.QUADRATIC_CURVE_TO:
+          {
+            const [a, b, c, d] = cmds.slice(i, i + 4);
+            commands.push(ctx => ctx.quadraticCurveTo(a, b, c, d));
+            i += 4;
+          }
+          break;
+        case FontRenderOps.RESTORE:
+          commands.push(ctx => ctx.restore());
+          break;
+        case FontRenderOps.SAVE:
+          commands.push(ctx => ctx.save());
+          break;
+        case FontRenderOps.SCALE:
+          // The scale command must be at the third position, after save and
+          // transform (for the font matrix) commands (see also
+          // font_renderer.js).
+          // The goal is to just scale the canvas and then run the commands loop
+          // without the need to pass the size parameter to each command.
+          assert(
+            commands.length === 2,
+            "Scale command is only valid at the third position."
+          );
+          break;
+        case FontRenderOps.TRANSFORM:
+          {
+            const [a, b, c, d, e, f] = cmds.slice(i, i + 6);
+            commands.push(ctx => ctx.transform(a, b, c, d, e, f));
+            i += 6;
+          }
+          break;
+        case FontRenderOps.TRANSLATE:
+          {
+            const [a, b] = cmds.slice(i, i + 2);
+            commands.push(ctx => ctx.translate(a, b));
+            i += 2;
+          }
+          break;
       }
-      // eslint-disable-next-line no-new-func
-      return (this.compiledGlyphs[character] = new Function(
-        "c",
-        "size",
-        jsBuf.join("")
-      ));
     }
-    // ... but fall back on using Function.prototype.apply() if we're
-    // blocked from using eval() for whatever reason (like CSP policies).
-    return (this.compiledGlyphs[character] = function (c, size) {
-      for (const current of cmds) {
-        if (current.cmd === "scale") {
-          current.args = [size, -size];
-        }
-        // eslint-disable-next-line prefer-spread
-        c[current.cmd].apply(c, current.args);
+    // From https://learn.microsoft.com/en-us/typography/opentype/spec/cff2#paths
+    // All contours must be closed with a lineto operation.
+    commands.push(ctx => ctx.closePath());
+
+    return (this.compiledGlyphs[character] = function glyphDrawer(ctx, size) {
+      commands[0](ctx);
+      commands[1](ctx);
+      ctx.scale(size, -size);
+      for (let i = 2, ii = commands.length; i < ii; i++) {
+        commands[i](ctx);
       }
     });
   }
