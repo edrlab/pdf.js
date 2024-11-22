@@ -378,14 +378,15 @@ const PDFViewerApplication = {
   async _initializeViewerComponents() {
     const { appConfig, externalServices, l10n } = this;
 
-    const eventBus =
-      typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
-        ? new FirefoxEventBus(
-            AppOptions.get("allowedGlobalEvents"),
-            externalServices,
-            AppOptions.get("isInAutomation")
-          )
-        : new EventBus();
+    // const eventBus =
+    //   typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
+    //     ? new FirefoxEventBus(
+    //         AppOptions.get("allowedGlobalEvents"),
+    //         externalServices,
+    //         AppOptions.get("isInAutomation")
+    //       )
+    //     : new EventBus();
+    const eventBus = window.pdfjsEventBus;
     this.eventBus = AppOptions.eventBus = eventBus;
     this.mlManager?.setEventBus(eventBus, this._globalAbortController.signal);
 
@@ -2026,9 +2027,9 @@ const PDFViewerApplication = {
           });
           const img = await blob.arrayBuffer();
 
-          const doc = page?.annotationLayerFactory?.pdfDocument;
+          const doc = this.pdfDocument;
           const metadata = await doc.getMetadata();
-          const numberofpages = doc?.numPages;
+          const numberofpages = doc.numPages;
           const numberOfPagesChecked = typeof numberofpages === "number" ? numberofpages : 0;
 
           // https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
