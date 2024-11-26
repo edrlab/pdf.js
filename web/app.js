@@ -259,6 +259,8 @@ const PDFViewerApplication = {
 
     this._initializedCapability.settled = true;
     this._initializedCapability.resolve();
+    // THORIUM_BUILD
+    this.eventBus.dispatch("__ready");
   },
 
   /**
@@ -376,15 +378,18 @@ const PDFViewerApplication = {
   async _initializeViewerComponents() {
     const { appConfig, externalServices, l10n } = this;
 
-    const eventBus =
-      typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
-        ? new FirefoxEventBus(
-            AppOptions.get("allowedGlobalEvents"),
-            externalServices,
-            AppOptions.get("isInAutomation")
-          )
-        : new EventBus();
-    this.eventBus = AppOptions.eventBus = eventBus;
+    // THORIUM_BUILD
+    // const eventBus =
+    //   typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
+    //     ? new FirefoxEventBus(
+    //         AppOptions.get("allowedGlobalEvents"),
+    //         externalServices,
+    //         AppOptions.get("isInAutomation")
+    //       )
+    //     : new EventBus();
+    console.log("PDFJS EVENT BUS FOUND:",!!window.pdfjsEventBus);
+    const eventBus = window.pdfjsEventBus || new EventBus();
+    this.eventBus = AppOptions.eventBus = eventBus
     this.mlManager?.setEventBus(eventBus, this._globalAbortController.signal);
 
     this.overlayManager = new OverlayManager();
@@ -1422,14 +1427,15 @@ const PDFViewerApplication = {
           this.pdfOutlineViewer.render({ outline, pdfDocument });
         });
       }
-      if (this.pdfAttachmentViewer) {
-        pdfDocument.getAttachments().then(attachments => {
-          if (pdfDocument !== this.pdfDocument) {
-            return; // The document was closed while the attachments resolved.
-          }
-          this.pdfAttachmentViewer.render({ attachments });
-        });
-      }
+      // THORIUM_BUILD
+      // if (this.pdfAttachmentViewer) {
+      //   pdfDocument.getAttachments().then(attachments => {
+      //     if (pdfDocument !== this.pdfDocument) {
+      //       return; // The document was closed while the attachments resolved.
+      //     }
+      //     this.pdfAttachmentViewer.render({ attachments });
+      //   });
+      // }
       if (this.pdfLayerViewer) {
         // Ensure that the layers accurately reflects the current state in the
         // viewer itself, rather than the default state provided by the API.
@@ -1444,6 +1450,7 @@ const PDFViewerApplication = {
 
     this._initializePageLabels(pdfDocument);
     this._initializeMetadata(pdfDocument);
+
   },
 
   /**
@@ -1883,8 +1890,8 @@ const PDFViewerApplication = {
 
     eventBus._on("resize", onResize.bind(this), opts);
     eventBus._on("hashchange", onHashchange.bind(this), opts);
-    eventBus._on("beforeprint", this.beforePrint.bind(this), opts);
-    eventBus._on("afterprint", this.afterPrint.bind(this), opts);
+    // eventBus._on("beforeprint", this.beforePrint.bind(this), opts);
+    // eventBus._on("afterprint", this.afterPrint.bind(this), opts);
     eventBus._on("pagerender", onPageRender.bind(this), opts);
     eventBus._on("pagerendered", onPageRendered.bind(this), opts);
     eventBus._on("updateviewarea", onUpdateViewarea.bind(this), opts);
@@ -1909,8 +1916,8 @@ const PDFViewerApplication = {
       evt => (pdfViewer.annotationEditorMode = evt),
       opts
     );
-    eventBus._on("print", this.triggerPrinting.bind(this), opts);
-    eventBus._on("download", this.downloadOrSave.bind(this), opts);
+    // eventBus._on("print", this.triggerPrinting.bind(this), opts);
+    // eventBus._on("download", this.downloadOrSave.bind(this), opts);
     eventBus._on("firstpage", () => (this.page = 1), opts);
     eventBus._on("lastpage", () => (this.page = this.pagesCount), opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
@@ -1974,8 +1981,8 @@ const PDFViewerApplication = {
     );
 
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      eventBus._on("fileinputchange", onFileInputChange.bind(this), opts);
-      eventBus._on("openfile", onOpenFile.bind(this), opts);
+      // eventBus._on("fileinputchange", onFileInputChange.bind(this), opts);
+      // eventBus._on("openfile", onOpenFile.bind(this), opts);
     }
     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
       eventBus._on(
@@ -1999,6 +2006,56 @@ const PDFViewerApplication = {
         opts
       );
     }
+
+
+    // THORIUM_BUILD
+    const pageRenderedExtract = async (ev) => {
+      try {
+        if (ev.pageNumber === 1) {
+          const page = ev.source;
+          if (!page || !page.canvas) {
+            throw Error("PDF PAGE CANVAS??!");
+          }
+
+          // const img = page?.canvas?.toDataURL("image/png");
+          const blob = await new Promise((res, _rej) => {
+            page.canvas.toBlob(
+              (blob) => {
+                res(blob);
+              },
+              "image/png",
+              0.95
+            );
+          });
+          const img = await blob.arrayBuffer();
+
+          const doc = this.pdfDocument;
+          const metadata = await doc.getMetadata();
+          const numberofpages = doc.numPages;
+          const numberOfPagesChecked = typeof numberofpages === "number" ? numberofpages : 0;
+
+          // https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
+          const data = {
+            ...metadata,
+            img,
+            numberofpages: numberOfPagesChecked,
+          };
+
+          // https://www.electronjs.org/docs/api/ipc-renderer#ipcrenderersendchannel-args
+          // const ipc = require('electron').ipcRenderer;
+          const ipc = window.electronIpcRenderer;
+          if (ipc) {
+            ipc.send("pdfjs-extract-data", data);
+          }
+
+          eventBus._off("pagerendered", pageRenderedExtract);
+        }
+      } catch (e) {
+        console.log("ERROR TO EXTRACT COVER AND METADATA FROM PDF");
+        console.log("ERROR", e);
+      }
+    };
+    eventBus._on("pagerendered", pageRenderedExtract);
   },
 
   bindWindowEvents() {
@@ -2235,9 +2292,11 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       // Removing of the following line will not guarantee that the viewer will
       // start accepting URLs from foreign origin -- CORS headers on the remote
       // server must be properly configured.
-      if (fileOrigin !== viewerOrigin) {
-        throw new Error("file origin does not match viewer's");
-      }
+
+      // THORIUM_BUILD
+      // if (fileOrigin !== viewerOrigin) {
+      //   throw new Error("file origin does not match viewer's");
+      // }
     } catch (ex) {
       PDFViewerApplication._documentError("pdfjs-loading-error", {
         message: ex.message,

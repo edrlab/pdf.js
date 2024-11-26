@@ -1,6 +1,10 @@
 *~
 local.mk
-build/
+build/*
+!build/gh-pages
+build/gh-pages/*
+!build/gh-pages/web
+!build/gh-pages/build
 tags
 .DS_Store
 Makefile

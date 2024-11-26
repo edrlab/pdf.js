@@ -66,7 +66,8 @@ const MINIFIED_LEGACY_DIR = BUILD_DIR + "minified-legacy/";
 const JSDOC_BUILD_DIR = BUILD_DIR + "jsdoc/";
 const GH_PAGES_DIR = BUILD_DIR + "gh-pages/";
 const DIST_DIR = BUILD_DIR + "dist/";
-const TYPES_DIR = BUILD_DIR + "types/";
+// THORIUM_BUILD
+const TYPES_DIR = "types/";
 const TMP_DIR = BUILD_DIR + "tmp/";
 const TYPESTEST_DIR = BUILD_DIR + "typestest/";
 const COMMON_WEB_FILES = [

@@ -382,7 +382,9 @@ class PDFPrintServiceFactory {
   }
 
   static get supportsPrinting() {
-    return shadow(this, "supportsPrinting", true);
+    // THORIUM_BUILD
+    // return shadow(this, "supportsPrinting", true);
+    return false;
   }
 
   static createPrintService(params) {

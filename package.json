@@ -1,6 +1,7 @@
 {
   "name": "pdf.js",
   "type": "module",
+  "typss": "types/src/pdf.d.ts",
   "devDependencies": {
     "@babel/core": "^7.26.0",
     "@babel/preset-env": "^7.26.0",
@@ -64,6 +65,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "build": "npx gulp web && npx gulp types"
   },
   "license": "Apache-2.0"
 }
