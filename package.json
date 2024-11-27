@@ -60,10 +60,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/mozilla/pdf.js.git"
+    "url": "git://github.com/edrlab/pdf.js.git"
   },
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "build": "npx gulp web && npx gulp types"
   },
   "license": "Apache-2.0"
 }
