@@ -209,7 +209,7 @@ class FreeTextEditor extends AnnotationEditor {
    */
   #updateFontSize(fontSize) {
     const setFontsize = size => {
-      this.editorDiv.style.fontSize = `calc(${size}px * var(--scale-factor))`;
+      this.editorDiv.style.fontSize = `calc(${size}px * var(--total-scale-factor))`;
       this.translate(0, -(size - this.#fontSize) * this.parentScale);
       this.#fontSize = size;
       this.#setEditorDimensions();
@@ -363,13 +363,15 @@ class FreeTextEditor extends AnnotationEditor {
   }
 
   /** @inheritdoc */
-  onceAdded() {
+  onceAdded(focus) {
     if (this.width) {
       // The editor was created in using ctrl+c.
       return;
     }
     this.enableEditMode();
-    this.editorDiv.focus();
+    if (focus) {
+      this.editorDiv.focus();
+    }
     if (this._initialOptions?.isCentered) {
       this.center();
     }
@@ -551,7 +553,7 @@ class FreeTextEditor extends AnnotationEditor {
     }
 
     let baseX, baseY;
-    if (this.width) {
+    if (this._isCopy || this.annotationElementId) {
       baseX = this.x;
       baseY = this.y;
     }
@@ -568,7 +570,7 @@ class FreeTextEditor extends AnnotationEditor {
     this.editorDiv.contentEditable = true;
 
     const { style } = this.editorDiv;
-    style.fontSize = `calc(${this.#fontSize}px * var(--scale-factor))`;
+    style.fontSize = `calc(${this.#fontSize}px * var(--total-scale-factor))`;
     style.color = this.#color;
 
     this.div.append(this.editorDiv);
@@ -579,7 +581,7 @@ class FreeTextEditor extends AnnotationEditor {
 
     bindEvents(this, this.div, ["dblclick", "keydown"]);
 
-    if (this.width) {
+    if (this._isCopy || this.annotationElementId) {
       // This editor was created in using copy (ctrl+c).
       const [parentWidth, parentHeight] = this.parentDimensions;
       if (this.annotationElementId) {
@@ -625,12 +627,7 @@ class FreeTextEditor extends AnnotationEditor {
         }
         this.setAt(posX * parentWidth, posY * parentHeight, tx, ty);
       } else {
-        this.setAt(
-          baseX * parentWidth,
-          baseY * parentHeight,
-          this.width * parentWidth,
-          this.height * parentHeight
-        );
+        this._moveAfterPaste(baseX, baseY);
       }
 
       this.#setContent();
@@ -721,7 +718,7 @@ class FreeTextEditor extends AnnotationEditor {
 
     // Set the caret at the right position.
     const newRange = new Range();
-    let beforeLength = bufferBefore.reduce((acc, line) => acc + line.length, 0);
+    let beforeLength = Math.sumPrecise(bufferBefore.map(line => line.length));
     for (const { firstChild } of this.editorDiv.childNodes) {
       // Each child is either a div with a text node or a br element.
       if (firstChild.nodeType === Node.TEXT_NODE) {
@@ -845,6 +842,7 @@ class FreeTextEditor extends AnnotationEditor {
     if (isForCopying) {
       // Don't add the id when copying because the pasted editor mustn't be
       // linked to an existing annotation.
+      serialized.isCopy = true;
       return serialized;
     }
 
@@ -876,7 +874,7 @@ class FreeTextEditor extends AnnotationEditor {
       return content;
     }
     const { style } = content;
-    style.fontSize = `calc(${this.#fontSize}px * var(--scale-factor))`;
+    style.fontSize = `calc(${this.#fontSize}px * var(--total-scale-factor))`;
     style.color = this.#color;
 
     content.replaceChildren();

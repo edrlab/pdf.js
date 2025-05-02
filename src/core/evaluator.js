@@ -16,9 +16,9 @@
 import {
   AbortException,
   assert,
+  DrawOPS,
   FONT_IDENTITY_MATRIX,
   FormatError,
-  IDENTITY_MATRIX,
   info,
   isArrayEqual,
   normalizeUnicode,
@@ -31,7 +31,15 @@ import {
 } from "../shared/util.js";
 import { CMapFactory, IdentityCMap } from "./cmap.js";
 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+import { compileType3Glyph, FontFlags } from "./fonts_utils.js";
 import { ErrorFont, Font } from "./fonts.js";
+import {
+  fetchBinaryData,
+  IDENTITY_MATRIX,
+  isNumberArray,
+  lookupMatrix,
+  lookupNormalRect,
+} from "./core_utils.js";
 import {
   getEncoding,
   MacRomanEncoding,
@@ -51,7 +59,6 @@ import {
 import { getTilingPatternIR, Pattern } from "./pattern.js";
 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
-import { isNumberArray, lookupMatrix, lookupNormalRect } from "./core_utils.js";
 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
 import { Lexer, Parser } from "./parser.js";
 import {
@@ -64,14 +71,11 @@ import {
 import { BaseStream } from "./base_stream.js";
 import { bidi } from "./bidi.js";
 import { ColorSpace } from "./colorspace.js";
-import { DecodeStream } from "./decode_stream.js";
-import { FontFlags } from "./fonts_utils.js";
+import { ColorSpaceUtils } from "./colorspace_utils.js";
 import { getFontSubstitution } from "./font_substitutions.js";
 import { getGlyphsUnicode } from "./glyphlist.js";
 import { getMetrics } from "./metrics.js";
 import { getUnicodeForGlyph } from "./unicode.js";
-import { ImageResizer } from "./image_resizer.js";
-import { JpegStream } from "./jpeg_stream.js";
 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
 import { OperatorList } from "./operator_list.js";
 import { PDFImage } from "./image.js";
@@ -87,8 +91,12 @@ const DefaultPartialEvaluatorOptions = Object.freeze({
   canvasMaxAreaInBytes: -1,
   fontExtraProperties: false,
   useSystemFonts: true,
+  useWasm: true,
+  useWorkerFetch: true,
   cMapUrl: null,
+  iccUrl: null,
   standardFontDataUrl: null,
+  wasmUrl: null,
 });
 
 const PatternType = {
@@ -171,14 +179,17 @@ function normalizeBlendMode(value, parsingArray = false) {
   return "source-over";
 }
 
-function addLocallyCachedImageOps(opList, data) {
-  if (data.objId) {
-    opList.addDependency(data.objId);
+function addCachedImageOps(
+  opList,
+  { objId, fn, args, optionalContent, hasMask }
+) {
+  if (objId) {
+    opList.addDependency(objId);
   }
-  opList.addImageOps(data.fn, data.args, data.optionalContent);
+  opList.addImageOps(fn, args, optionalContent, hasMask);
 
-  if (data.fn === OPS.paintImageMaskXObject && data.args[0]?.count > 0) {
-    data.args[0].count++;
+  if (fn === OPS.paintImageMaskXObject && args[0]?.count > 0) {
+    args[0].count++;
   }
 }
 
@@ -215,6 +226,7 @@ class PartialEvaluator {
     fontCache,
     builtInCMapCache,
     standardFontDataCache,
+    globalColorSpaceCache,
     globalImageCache,
     systemFontCache,
     options = null,
@@ -226,6 +238,7 @@ class PartialEvaluator {
     this.fontCache = fontCache;
     this.builtInCMapCache = builtInCMapCache;
     this.standardFontDataCache = standardFontDataCache;
+    this.globalColorSpaceCache = globalColorSpaceCache;
     this.globalImageCache = globalImageCache;
     this.systemFontCache = systemFontCache;
     this.options = options || DefaultPartialEvaluatorOptions;
@@ -233,9 +246,6 @@ class PartialEvaluator {
 
     this._regionalImageCache = new RegionalImageCache();
     this._fetchBuiltInCMapBound = this.fetchBuiltInCMap.bind(this);
-
-    ImageResizer.setOptions(this.options);
-    JpegStream.setOptions(this.options);
   }
 
   /**
@@ -376,16 +386,6 @@ class PartialEvaluator {
     return false;
   }
 
-  async #fetchData(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch file "${url}" with "${response.statusText}".`
-      );
-    }
-    return new Uint8Array(await response.arrayBuffer());
-  }
-
   async fetchBuiltInCMap(name) {
     const cachedData = this.builtInCMapCache.get(name);
     if (cachedData) {
@@ -393,15 +393,18 @@ class PartialEvaluator {
     }
     let data;
 
-    if (this.options.cMapUrl !== null) {
+    if (this.options.useWorkerFetch) {
       // Only compressed CMaps are (currently) supported here.
-      const cMapData = await this.#fetchData(
-        `${this.options.cMapUrl}${name}.bcmap`
-      );
-      data = { cMapData, isCompressed: true };
+      data = {
+        cMapData: await fetchBinaryData(`${this.options.cMapUrl}${name}.bcmap`),
+        isCompressed: true,
+      };
     } else {
       // Get the data on the main-thread instead.
-      data = await this.handler.sendWithPromise("FetchBuiltInCMap", { name });
+      data = await this.handler.sendWithPromise("FetchBinaryData", {
+        type: "cMapReaderFactory",
+        name,
+      });
     }
     // Cache the CMap data, to avoid fetching it repeatedly.
     this.builtInCMapCache.set(name, data);
@@ -430,13 +433,14 @@ class PartialEvaluator {
     let data;
 
     try {
-      if (this.options.standardFontDataUrl !== null) {
-        data = await this.#fetchData(
+      if (this.options.useWorkerFetch) {
+        data = await fetchBinaryData(
           `${this.options.standardFontDataUrl}${filename}`
         );
       } else {
         // Get the data on the main-thread instead.
-        data = await this.handler.sendWithPromise("FetchStandardFontData", {
+        data = await this.handler.sendWithPromise("FetchBinaryData", {
+          type: "standardFontDataFactory",
           filename,
         });
       }
@@ -458,9 +462,10 @@ class PartialEvaluator {
     operatorList,
     task,
     initialState,
-    localColorSpaceCache
+    localColorSpaceCache,
+    seenRefs
   ) {
-    const dict = xobj.dict;
+    const { dict } = xobj;
     const matrix = lookupMatrix(dict.getArray("Matrix"), null);
     const bbox = lookupNormalRect(dict.getArray("BBox"), null);
 
@@ -490,27 +495,18 @@ class PartialEvaluator {
         groupOptions.isolated = group.get("I") || false;
         groupOptions.knockout = group.get("K") || false;
         if (group.has("CS")) {
-          const cs = group.getRaw("CS");
-
-          const cachedColorSpace = ColorSpace.getCached(
-            cs,
-            this.xref,
+          const cs = this._getColorSpace(
+            group.getRaw("CS"),
+            resources,
             localColorSpaceCache
           );
-          if (cachedColorSpace) {
-            colorSpace = cachedColorSpace;
-          } else {
-            colorSpace = await this.parseColorSpace({
-              cs,
-              resources,
-              localColorSpaceCache,
-            });
-          }
+          colorSpace =
+            cs instanceof ColorSpace ? cs : await this._handleColorSpace(cs);
         }
       }
 
       if (smask?.backdrop) {
-        colorSpace ||= ColorSpace.singletons.rgb;
+        colorSpace ||= ColorSpaceUtils.rgb;
         smask.backdrop = colorSpace.getRgb(smask.backdrop, 0);
       }
 
@@ -520,15 +516,20 @@ class PartialEvaluator {
     // If it's a group, a new canvas will be created that is the size of the
     // bounding box and translated to the correct position so we don't need to
     // apply the bounding box to it.
-    const args = group ? [matrix, null] : [matrix, bbox];
+    const f32matrix = matrix && new Float32Array(matrix);
+    const f32bbox = (!group && bbox && new Float32Array(bbox)) || null;
+    const args = [f32matrix, f32bbox];
     operatorList.addOp(OPS.paintFormXObjectBegin, args);
+
+    const localResources = dict.get("Resources");
 
     await this.getOperatorList({
       stream: xobj,
       task,
-      resources: dict.get("Resources") || resources,
+      resources: localResources instanceof Dict ? localResources : resources,
       operatorList,
       initialState,
+      prevRefs: seenRefs,
     });
     operatorList.addOp(OPS.paintFormXObjectEnd, []);
 
@@ -573,7 +574,10 @@ class PartialEvaluator {
     localImageCache,
     localColorSpaceCache,
   }) {
-    const dict = image.dict;
+    const { maxImageSize, ignoreErrors, isOffscreenCanvasSupported } =
+      this.options;
+
+    const { dict } = image;
     const imageRef = dict.objId;
     const w = dict.get("W", "Width");
     const h = dict.get("H", "Height");
@@ -582,15 +586,14 @@ class PartialEvaluator {
       warn("Image dimensions are missing, or not numbers.");
       return;
     }
-    const maxImageSize = this.options.maxImageSize;
     if (maxImageSize !== -1 && w * h > maxImageSize) {
       const msg = "Image exceeded maximum allowed size and was removed.";
 
-      if (this.options.ignoreErrors) {
-        warn(msg);
-        return;
+      if (!ignoreErrors) {
+        throw new Error(msg);
       }
-      throw new Error(msg);
+      warn(msg);
+      return;
     }
 
     let optionalContent;
@@ -602,43 +605,28 @@ class PartialEvaluator {
     }
 
     const imageMask = dict.get("IM", "ImageMask") || false;
-    let imgData, args;
+    let imgData, fn, args;
     if (imageMask) {
       // This depends on a tmpCanvas being filled with the
       // current fillStyle, such that processing the pixel
       // data can't be done here. Instead of creating a
       // complete PDFImage, only read the information needed
       // for later.
-      const interpolate = dict.get("I", "Interpolate");
-      const bitStrideLength = (w + 7) >> 3;
-      const imgArray = image.getBytes(bitStrideLength * h);
-      const decode = dict.getArray("D", "Decode");
+      imgData = await PDFImage.createMask({
+        image,
+        isOffscreenCanvasSupported:
+          isOffscreenCanvasSupported && !this.parsingType3Font,
+      });
 
-      if (this.parsingType3Font) {
-        imgData = PDFImage.createRawMask({
-          imgArray,
-          width: w,
-          height: h,
-          imageIsFromDecodeStream: image instanceof DecodeStream,
-          inverseDecode: decode?.[0] > 0,
-          interpolate,
-        });
-
-        imgData.cached = !!cacheKey;
-        args = [imgData];
-
-        operatorList.addImageOps(
-          OPS.paintImageMaskXObject,
-          args,
-          optionalContent
-        );
+      if (imgData.isSingleOpaquePixel) {
+        // Handles special case of mainly LaTeX documents which use image
+        // masks to draw lines with the current fill style.
+        fn = OPS.paintSolidColorImageMask;
+        args = [];
+        operatorList.addImageOps(fn, args, optionalContent);
 
         if (cacheKey) {
-          const cacheData = {
-            fn: OPS.paintImageMaskXObject,
-            args,
-            optionalContent,
-          };
+          const cacheData = { fn, args, optionalContent };
           localImageCache.set(cacheKey, imageRef, cacheData);
 
           if (imageRef) {
@@ -652,41 +640,33 @@ class PartialEvaluator {
         return;
       }
 
-      imgData = await PDFImage.createMask({
-        imgArray,
-        width: w,
-        height: h,
-        imageIsFromDecodeStream: image instanceof DecodeStream,
-        inverseDecode: decode?.[0] > 0,
-        interpolate,
-        isOffscreenCanvasSupported: this.options.isOffscreenCanvasSupported,
-      });
+      if (this.parsingType3Font) {
+        // NOTE: Compared to other image resources we don't bother caching
+        // Type3-glyph image masks, since we've not come across any cases
+        // where that actually helps.
+        // In Type3-glyphs image masks are "always" inline resources,
+        // they're usually fairly small and aren't being re-used either.
+        if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+          assert(
+            imgData.data instanceof Uint8Array,
+            "Type3 glyph image mask must be a TypedArray."
+          );
+        }
+        args = compileType3Glyph(imgData);
 
-      if (imgData.isSingleOpaquePixel) {
-        // Handles special case of mainly LaTeX documents which use image
-        // masks to draw lines with the current fill style.
+        if (args) {
+          operatorList.addImageOps(OPS.constructPath, args, optionalContent);
+          return;
+        }
+        warn("Cannot compile Type3 glyph.");
+
+        // If compilation failed, or was disabled, fallback to using an inline
+        // image mask; this case should be extremely rare.
         operatorList.addImageOps(
-          OPS.paintSolidColorImageMask,
-          [],
+          OPS.paintImageMaskXObject,
+          [imgData],
           optionalContent
         );
-
-        if (cacheKey) {
-          const cacheData = {
-            fn: OPS.paintSolidColorImageMask,
-            args: [],
-            optionalContent,
-          };
-          localImageCache.set(cacheKey, imageRef, cacheData);
-
-          if (imageRef) {
-            this._regionalImageCache.set(
-              /* name = */ null,
-              imageRef,
-              cacheData
-            );
-          }
-        }
         return;
       }
 
@@ -698,6 +678,7 @@ class PartialEvaluator {
         : imgData.data.length;
       this._sendImgData(objId, imgData);
 
+      fn = OPS.paintImageMaskXObject;
       args = [
         {
           data: objId,
@@ -707,19 +688,10 @@ class PartialEvaluator {
           count: 1,
         },
       ];
-      operatorList.addImageOps(
-        OPS.paintImageMaskXObject,
-        args,
-        optionalContent
-      );
+      operatorList.addImageOps(fn, args, optionalContent);
 
       if (cacheKey) {
-        const cacheData = {
-          objId,
-          fn: OPS.paintImageMaskXObject,
-          args,
-          optionalContent,
-        };
+        const cacheData = { objId, fn, args, optionalContent };
         localImageCache.set(cacheKey, imageRef, cacheData);
 
         if (imageRef) {
@@ -730,13 +702,9 @@ class PartialEvaluator {
     }
 
     const SMALL_IMAGE_DIMENSIONS = 200;
+    const hasMask = dict.has("SMask") || dict.has("Mask");
     // Inlining small images into the queue as RGB data
-    if (
-      isInline &&
-      w + h < SMALL_IMAGE_DIMENSIONS &&
-      !dict.has("SMask") &&
-      !dict.has("Mask")
-    ) {
+    if (isInline && w + h < SMALL_IMAGE_DIMENSIONS && !hasMask) {
       try {
         const imageObj = new PDFImage({
           xref: this.xref,
@@ -744,6 +712,7 @@ class PartialEvaluator {
           image,
           isInline,
           pdfFunctionFactory: this._pdfFunctionFactory,
+          globalColorSpaceCache: this.globalColorSpaceCache,
           localColorSpaceCache,
         });
         // We force the use of RGBA_32BPP images here, because we can't handle
@@ -752,8 +721,6 @@ class PartialEvaluator {
           /* forceRGBA = */ true,
           /* isOffscreenCanvasSupported = */ false
         );
-        operatorList.isOffscreenCanvasSupported =
-          this.options.isOffscreenCanvasSupported;
         operatorList.addImageOps(
           OPS.paintInlineImageXObject,
           [imgData],
@@ -762,7 +729,7 @@ class PartialEvaluator {
       } catch (reason) {
         const msg = `Unable to decode inline image: "${reason}".`;
 
-        if (!this.options.ignoreErrors) {
+        if (!ignoreErrors) {
           throw new Error(msg);
         }
         warn(msg);
@@ -773,7 +740,8 @@ class PartialEvaluator {
     // If there is no imageMask, create the PDFImage and a lot
     // of image processing can be done here.
     let objId = `img_${this.idFactory.createObjId()}`,
-      cacheGlobally = false;
+      cacheGlobally = false,
+      globalCacheData = null;
 
     if (this.parsingType3Font) {
       objId = `${this.idFactory.getDocId()}_type3_${objId}`;
@@ -792,18 +760,23 @@ class PartialEvaluator {
 
     // Ensure that the dependency is added before the image is decoded.
     operatorList.addDependency(objId);
+
+    fn = OPS.paintImageXObject;
     args = [objId, w, h];
-    operatorList.addImageOps(OPS.paintImageXObject, args, optionalContent);
+    operatorList.addImageOps(fn, args, optionalContent, hasMask);
 
     if (cacheGlobally) {
+      globalCacheData = {
+        objId,
+        fn,
+        args,
+        optionalContent,
+        hasMask,
+        byteSize: 0, // Temporary entry, to avoid `setData` returning early.
+      };
+
       if (this.globalImageCache.hasDecodeFailed(imageRef)) {
-        this.globalImageCache.setData(imageRef, {
-          objId,
-          fn: OPS.paintImageXObject,
-          args,
-          optionalContent,
-          byteSize: 0, // Data is `null`, since decoding failed previously.
-        });
+        this.globalImageCache.setData(imageRef, globalCacheData);
 
         this._sendImgData(objId, /* imgData = */ null, cacheGlobally);
         return;
@@ -812,7 +785,7 @@ class PartialEvaluator {
       // For large (at least 500x500) or more complex images that we'll cache
       // globally, check if the image is still cached locally on the main-thread
       // to avoid having to re-parse the image (since that can be slow).
-      if (w * h > 250000 || dict.has("SMask") || dict.has("Mask")) {
+      if (w * h > 250000 || hasMask) {
         const localLength = await this.handler.sendWithPromise("commonobj", [
           objId,
           "CopyLocalImage",
@@ -820,13 +793,7 @@ class PartialEvaluator {
         ]);
 
         if (localLength) {
-          this.globalImageCache.setData(imageRef, {
-            objId,
-            fn: OPS.paintImageXObject,
-            args,
-            optionalContent,
-            byteSize: 0, // Temporary entry, to avoid `setData` returning early.
-          });
+          this.globalImageCache.setData(imageRef, globalCacheData);
           this.globalImageCache.addByteSize(imageRef, localLength);
           return;
         }
@@ -839,13 +806,13 @@ class PartialEvaluator {
       image,
       isInline,
       pdfFunctionFactory: this._pdfFunctionFactory,
+      globalColorSpaceCache: this.globalColorSpaceCache,
       localColorSpaceCache,
     })
       .then(async imageObj => {
         imgData = await imageObj.createImageData(
           /* forceRGBA = */ false,
-          /* isOffscreenCanvasSupported = */ this.options
-            .isOffscreenCanvasSupported
+          isOffscreenCanvasSupported
         );
         imgData.dataLen = imgData.bitmap
           ? imgData.width * imgData.height * 4
@@ -867,25 +834,15 @@ class PartialEvaluator {
       });
 
     if (cacheKey) {
-      const cacheData = {
-        objId,
-        fn: OPS.paintImageXObject,
-        args,
-        optionalContent,
-      };
+      const cacheData = { objId, fn, args, optionalContent, hasMask };
       localImageCache.set(cacheKey, imageRef, cacheData);
 
       if (imageRef) {
         this._regionalImageCache.set(/* name = */ null, imageRef, cacheData);
 
         if (cacheGlobally) {
-          this.globalImageCache.setData(imageRef, {
-            objId,
-            fn: OPS.paintImageXObject,
-            args,
-            optionalContent,
-            byteSize: 0, // Temporary entry, note `addByteSize` above.
-          });
+          assert(globalCacheData, "The global cache-data must be available.");
+          this.globalImageCache.setData(imageRef, globalCacheData);
         }
       }
     }
@@ -897,7 +854,8 @@ class PartialEvaluator {
     operatorList,
     task,
     stateManager,
-    localColorSpaceCache
+    localColorSpaceCache,
+    seenRefs
   ) {
     const smaskContent = smask.get("G");
     const smaskOptions = {
@@ -926,8 +884,9 @@ class PartialEvaluator {
       smaskOptions,
       operatorList,
       task,
-      stateManager.state.clone(),
-      localColorSpaceCache
+      stateManager.state.clone({ newPath: true }),
+      localColorSpaceCache,
+      seenRefs
     );
   }
 
@@ -1044,28 +1003,19 @@ class PartialEvaluator {
   ) {
     const fontName = fontArgs?.[0] instanceof Name ? fontArgs[0].name : null;
 
-    let translated = await this.loadFont(
+    const translated = await this.loadFont(
       fontName,
       fontRef,
       resources,
+      task,
       fallbackFontDict,
       cssFontInfo
     );
 
     if (translated.font.isType3Font) {
-      try {
-        await translated.loadType3Data(this, resources, task);
-        // Add the dependencies to the parent operatorList so they are
-        // resolved before Type3 operatorLists are executed synchronously.
-        operatorList.addDependencies(translated.type3Dependencies);
-      } catch (reason) {
-        translated = new TranslatedFont({
-          loadedName: "g_font_error",
-          font: new ErrorFont(`Type3 font load error: ${reason}`),
-          dict: translated.font,
-          evaluatorOptions: this.options,
-        });
-      }
+      // Add the dependencies to the parent operatorList so they are
+      // resolved before Type3 operatorLists are executed synchronously.
+      operatorList.addDependencies(translated.type3Dependencies);
     }
 
     state.font = translated.font;
@@ -1084,8 +1034,7 @@ class PartialEvaluator {
       if (
         isAddToPathSet ||
         state.fillColorSpace.name === "Pattern" ||
-        font.disableFontFace ||
-        this.options.disableFontFace
+        font.disableFontFace
       ) {
         PartialEvaluator.buildFontPaths(
           font,
@@ -1122,18 +1071,24 @@ class PartialEvaluator {
     stateManager,
     localGStateCache,
     localColorSpaceCache,
+    seenRefs,
   }) {
     const gStateRef = gState.objId;
     let isSimpleGState = true;
     // This array holds the converted/processed state data.
     const gStateObj = [];
     let promise = Promise.resolve();
-    for (const key of gState.getKeys()) {
-      const value = gState.get(key);
+    for (const [key, value] of gState) {
       switch (key) {
         case "Type":
           break;
         case "LW":
+          if (typeof value !== "number") {
+            warn(`Invalid LW (line width): ${value}`);
+            break;
+          }
+          gStateObj.push([key, Math.abs(value)]);
+          break;
         case "LC":
         case "LJ":
         case "ML":
@@ -1179,7 +1134,8 @@ class PartialEvaluator {
                 operatorList,
                 task,
                 stateManager,
-                localColorSpaceCache
+                localColorSpaceCache,
+                seenRefs
               )
             );
             gStateObj.push([key, true]);
@@ -1229,18 +1185,16 @@ class PartialEvaluator {
     fontName,
     font,
     resources,
+    task,
     fallbackFontDict = null,
     cssFontInfo = null
   ) {
-    // eslint-disable-next-line arrow-body-style
-    const errorFont = async () => {
-      return new TranslatedFont({
+    const errorFont = async () =>
+      new TranslatedFont({
         loadedName: "g_font_error",
         font: new ErrorFont(`Font "${fontName}" is not available.`),
         dict: font,
-        evaluatorOptions: this.options,
       });
-    };
 
     let fontRef;
     if (font) {
@@ -1360,15 +1314,21 @@ class PartialEvaluator {
     font.loadedName = `${this.idFactory.getDocId()}_${fontID}`;
 
     this.translateFont(preEvaluatedFont)
-      .then(translatedFont => {
-        resolve(
-          new TranslatedFont({
-            loadedName: font.loadedName,
-            font: translatedFont,
-            dict: font,
-            evaluatorOptions: this.options,
-          })
-        );
+      .then(async translatedFont => {
+        const translated = new TranslatedFont({
+          loadedName: font.loadedName,
+          font: translatedFont,
+          dict: font,
+        });
+
+        if (translatedFont.isType3Font) {
+          try {
+            await translated.loadType3Data(this, resources, task);
+          } catch (reason) {
+            throw new Error(`Type3 font load error: ${reason}`);
+          }
+        }
+        resolve(translated);
       })
       .catch(reason => {
         // TODO reject?
@@ -1377,111 +1337,139 @@ class PartialEvaluator {
         resolve(
           new TranslatedFont({
             loadedName: font.loadedName,
-            font: new ErrorFont(
-              reason instanceof Error ? reason.message : reason
-            ),
+            font: new ErrorFont(reason?.message),
             dict: font,
-            evaluatorOptions: this.options,
           })
         );
       });
     return promise;
   }
 
-  buildPath(operatorList, fn, args, parsingText = false) {
-    const lastIndex = operatorList.length - 1;
-    if (!args) {
-      args = [];
-    }
-    if (
-      lastIndex < 0 ||
-      operatorList.fnArray[lastIndex] !== OPS.constructPath
-    ) {
-      // Handle corrupt PDF documents that contains path operators inside of
-      // text objects, which may shift subsequent text, by enclosing the path
-      // operator in save/restore operators (fixes issue10542_reduced.pdf).
-      //
-      // Note that this will effectively disable the optimization in the
-      // `else` branch below, but given that this type of corruption is
-      // *extremely* rare that shouldn't really matter much in practice.
-      if (parsingText) {
-        warn(`Encountered path operator "${fn}" inside of a text object.`);
-        operatorList.addOp(OPS.save, null);
+  buildPath(fn, args, state) {
+    const { pathMinMax: minMax, pathBuffer } = state;
+    switch (fn | 0) {
+      case OPS.rectangle: {
+        const x = (state.currentPointX = args[0]);
+        const y = (state.currentPointY = args[1]);
+        const width = args[2];
+        const height = args[3];
+        const xw = x + width;
+        const yh = y + height;
+        if (width === 0 || height === 0) {
+          pathBuffer.push(
+            DrawOPS.moveTo,
+            x,
+            y,
+            DrawOPS.lineTo,
+            xw,
+            yh,
+            DrawOPS.closePath
+          );
+        } else {
+          pathBuffer.push(
+            DrawOPS.moveTo,
+            x,
+            y,
+            DrawOPS.lineTo,
+            xw,
+            y,
+            DrawOPS.lineTo,
+            xw,
+            yh,
+            DrawOPS.lineTo,
+            x,
+            yh,
+            DrawOPS.closePath
+          );
+        }
+        Util.rectBoundingBox(x, y, xw, yh, minMax);
+        break;
       }
-
-      let minMax;
-      switch (fn) {
-        case OPS.rectangle:
-          const x = args[0] + args[2];
-          const y = args[1] + args[3];
-          minMax = [
-            Math.min(args[0], x),
-            Math.min(args[1], y),
-            Math.max(args[0], x),
-            Math.max(args[1], y),
-          ];
-          break;
-        case OPS.moveTo:
-        case OPS.lineTo:
-          minMax = [args[0], args[1], args[0], args[1]];
-          break;
-        default:
-          minMax = [Infinity, Infinity, -Infinity, -Infinity];
-          break;
+      case OPS.moveTo: {
+        const x = (state.currentPointX = args[0]);
+        const y = (state.currentPointY = args[1]);
+        pathBuffer.push(DrawOPS.moveTo, x, y);
+        Util.pointBoundingBox(x, y, minMax);
+        break;
       }
-      operatorList.addOp(OPS.constructPath, [[fn], args, minMax]);
-
-      if (parsingText) {
-        operatorList.addOp(OPS.restore, null);
+      case OPS.lineTo: {
+        const x = (state.currentPointX = args[0]);
+        const y = (state.currentPointY = args[1]);
+        pathBuffer.push(DrawOPS.lineTo, x, y);
+        Util.pointBoundingBox(x, y, minMax);
+        break;
       }
-    } else {
-      const opArgs = operatorList.argsArray[lastIndex];
-      opArgs[0].push(fn);
-      opArgs[1].push(...args);
-      const minMax = opArgs[2];
-
-      // Compute min/max in the worker instead of the main thread.
-      // If the current matrix (when drawing) is a scaling one
-      // then min/max can be easily computed in using those values.
-      // Only rectangle, lineTo and moveTo are handled here since
-      // Bezier stuff requires to have the starting point.
-      switch (fn) {
-        case OPS.rectangle:
-          const x = args[0] + args[2];
-          const y = args[1] + args[3];
-          minMax[0] = Math.min(minMax[0], args[0], x);
-          minMax[1] = Math.min(minMax[1], args[1], y);
-          minMax[2] = Math.max(minMax[2], args[0], x);
-          minMax[3] = Math.max(minMax[3], args[1], y);
-          break;
-        case OPS.moveTo:
-        case OPS.lineTo:
-          minMax[0] = Math.min(minMax[0], args[0]);
-          minMax[1] = Math.min(minMax[1], args[1]);
-          minMax[2] = Math.max(minMax[2], args[0]);
-          minMax[3] = Math.max(minMax[3], args[1]);
-          break;
+      case OPS.curveTo: {
+        const startX = state.currentPointX;
+        const startY = state.currentPointY;
+        const [x1, y1, x2, y2, x, y] = args;
+        state.currentPointX = x;
+        state.currentPointY = y;
+        pathBuffer.push(DrawOPS.curveTo, x1, y1, x2, y2, x, y);
+        Util.bezierBoundingBox(startX, startY, x1, y1, x2, y2, x, y, minMax);
+        break;
       }
+      case OPS.curveTo2: {
+        const startX = state.currentPointX;
+        const startY = state.currentPointY;
+        const [x1, y1, x, y] = args;
+        state.currentPointX = x;
+        state.currentPointY = y;
+        pathBuffer.push(DrawOPS.curveTo, startX, startY, x1, y1, x, y);
+        Util.bezierBoundingBox(
+          startX,
+          startY,
+          startX,
+          startY,
+          x1,
+          y1,
+          x,
+          y,
+          minMax
+        );
+        break;
+      }
+      case OPS.curveTo3: {
+        const startX = state.currentPointX;
+        const startY = state.currentPointY;
+        const [x1, y1, x, y] = args;
+        state.currentPointX = x;
+        state.currentPointY = y;
+        pathBuffer.push(DrawOPS.curveTo, x1, y1, x, y, x, y);
+        Util.bezierBoundingBox(startX, startY, x1, y1, x, y, x, y, minMax);
+        break;
+      }
+      case OPS.closePath:
+        pathBuffer.push(DrawOPS.closePath);
+        break;
     }
   }
 
-  parseColorSpace({ cs, resources, localColorSpaceCache }) {
-    return ColorSpace.parseAsync({
+  _getColorSpace(cs, resources, localColorSpaceCache) {
+    return ColorSpaceUtils.parse({
       cs,
       xref: this.xref,
       resources,
       pdfFunctionFactory: this._pdfFunctionFactory,
+      globalColorSpaceCache: this.globalColorSpaceCache,
       localColorSpaceCache,
-    }).catch(reason => {
-      if (reason instanceof AbortException) {
+      asyncIfNotCached: true,
+    });
+  }
+
+  async _handleColorSpace(csPromise) {
+    try {
+      return await csPromise;
+    } catch (ex) {
+      if (ex instanceof AbortException) {
         return null;
       }
       if (this.options.ignoreErrors) {
-        warn(`parseColorSpace - ignoring ColorSpace: "${reason}".`);
+        warn(`_handleColorSpace - ignoring ColorSpace: "${ex}".`);
         return null;
       }
-      throw reason;
-    });
+      throw ex;
+    }
   }
 
   parseShading({
@@ -1504,6 +1492,7 @@ class PartialEvaluator {
         this.xref,
         resources,
         this._pdfFunctionFactory,
+        this.globalColorSpaceCache,
         localColorSpaceCache
       );
       patternIR = shadingFill.getIR();
@@ -1715,7 +1704,19 @@ class PartialEvaluator {
     operatorList,
     initialState = null,
     fallbackFontDict = null,
+    prevRefs = null,
   }) {
+    const objId = stream.dict?.objId;
+    const seenRefs = new RefSet(prevRefs);
+
+    if (objId) {
+      if (prevRefs?.has(objId)) {
+        throw new Error(
+          `getOperatorList - ignoring circular reference: ${objId}`
+        );
+      }
+      seenRefs.put(objId);
+    }
     // Ensure that `resources`/`initialState` is correctly initialized,
     // even if the provided parameter is e.g. `null`.
     resources ||= Dict.empty;
@@ -1727,7 +1728,6 @@ class PartialEvaluator {
 
     const self = this;
     const xref = this.xref;
-    let parsingText = false;
     const localImageCache = new LocalImageCache();
     const localColorSpaceCache = new LocalColorSpaceCache();
     const localGStateCache = new LocalGStateCache();
@@ -1782,7 +1782,7 @@ class PartialEvaluator {
             if (isValidName) {
               const localImage = localImageCache.getByName(name);
               if (localImage) {
-                addLocallyCachedImageOps(operatorList, localImage);
+                addCachedImageOps(operatorList, localImage);
                 args = null;
                 continue;
               }
@@ -1796,27 +1796,12 @@ class PartialEvaluator {
 
                 let xobj = xobjs.getRaw(name);
                 if (xobj instanceof Ref) {
-                  const localImage =
+                  const cachedImage =
                     localImageCache.getByRef(xobj) ||
-                    self._regionalImageCache.getByRef(xobj);
-                  if (localImage) {
-                    addLocallyCachedImageOps(operatorList, localImage);
-                    resolveXObject();
-                    return;
-                  }
-
-                  const globalImage = self.globalImageCache.getData(
-                    xobj,
-                    self.pageIndex
-                  );
-                  if (globalImage) {
-                    operatorList.addDependency(globalImage.objId);
-                    operatorList.addImageOps(
-                      globalImage.fn,
-                      globalImage.args,
-                      globalImage.optionalContent
-                    );
-
+                    self._regionalImageCache.getByRef(xobj) ||
+                    self.globalImageCache.getData(xobj, self.pageIndex);
+                  if (cachedImage) {
+                    addCachedImageOps(operatorList, cachedImage);
                     resolveXObject();
                     return;
                   }
@@ -1842,8 +1827,9 @@ class PartialEvaluator {
                       null,
                       operatorList,
                       task,
-                      stateManager.state.clone(),
-                      localColorSpaceCache
+                      stateManager.state.clone({ newPath: true }),
+                      localColorSpaceCache,
+                      seenRefs
                     )
                     .then(function () {
                       stateManager.restore();
@@ -1904,18 +1890,12 @@ class PartialEvaluator {
                 })
             );
             return;
-          case OPS.beginText:
-            parsingText = true;
-            break;
-          case OPS.endText:
-            parsingText = false;
-            break;
           case OPS.endInlineImage:
             const cacheKey = args[0].cacheKey;
             if (cacheKey) {
               const localImage = localImageCache.getByName(cacheKey);
               if (localImage) {
-                addLocallyCachedImageOps(operatorList, localImage);
+                addCachedImageOps(operatorList, localImage);
                 args = null;
                 continue;
               }
@@ -1981,52 +1961,40 @@ class PartialEvaluator {
             break;
 
           case OPS.setFillColorSpace: {
-            const cachedColorSpace = ColorSpace.getCached(
+            const fillCS = self._getColorSpace(
               args[0],
-              xref,
+              resources,
               localColorSpaceCache
             );
-            if (cachedColorSpace) {
-              stateManager.state.fillColorSpace = cachedColorSpace;
+            if (fillCS instanceof ColorSpace) {
+              stateManager.state.fillColorSpace = fillCS;
               continue;
             }
 
             next(
-              self
-                .parseColorSpace({
-                  cs: args[0],
-                  resources,
-                  localColorSpaceCache,
-                })
-                .then(function (colorSpace) {
-                  stateManager.state.fillColorSpace =
-                    colorSpace || ColorSpace.singletons.gray;
-                })
+              self._handleColorSpace(fillCS).then(colorSpace => {
+                stateManager.state.fillColorSpace =
+                  colorSpace || ColorSpaceUtils.gray;
+              })
             );
             return;
           }
           case OPS.setStrokeColorSpace: {
-            const cachedColorSpace = ColorSpace.getCached(
+            const strokeCS = self._getColorSpace(
               args[0],
-              xref,
+              resources,
               localColorSpaceCache
             );
-            if (cachedColorSpace) {
-              stateManager.state.strokeColorSpace = cachedColorSpace;
+            if (strokeCS instanceof ColorSpace) {
+              stateManager.state.strokeColorSpace = strokeCS;
               continue;
             }
 
             next(
-              self
-                .parseColorSpace({
-                  cs: args[0],
-                  resources,
-                  localColorSpaceCache,
-                })
-                .then(function (colorSpace) {
-                  stateManager.state.strokeColorSpace =
-                    colorSpace || ColorSpace.singletons.gray;
-                })
+              self._handleColorSpace(strokeCS).then(colorSpace => {
+                stateManager.state.strokeColorSpace =
+                  colorSpace || ColorSpaceUtils.gray;
+              })
             );
             return;
           }
@@ -2041,38 +2009,38 @@ class PartialEvaluator {
             fn = OPS.setStrokeRGBColor;
             break;
           case OPS.setFillGray:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
-            args = ColorSpace.singletons.gray.getRgb(args, 0);
+            stateManager.state.fillColorSpace = ColorSpaceUtils.gray;
+            args = ColorSpaceUtils.gray.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
             break;
           case OPS.setStrokeGray:
-            stateManager.state.strokeColorSpace = ColorSpace.singletons.gray;
-            args = ColorSpace.singletons.gray.getRgb(args, 0);
+            stateManager.state.strokeColorSpace = ColorSpaceUtils.gray;
+            args = ColorSpaceUtils.gray.getRgb(args, 0);
             fn = OPS.setStrokeRGBColor;
             break;
           case OPS.setFillCMYKColor:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
-            args = ColorSpace.singletons.cmyk.getRgb(args, 0);
+            stateManager.state.fillColorSpace = ColorSpaceUtils.cmyk;
+            args = ColorSpaceUtils.cmyk.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
             break;
           case OPS.setStrokeCMYKColor:
-            stateManager.state.strokeColorSpace = ColorSpace.singletons.cmyk;
-            args = ColorSpace.singletons.cmyk.getRgb(args, 0);
+            stateManager.state.strokeColorSpace = ColorSpaceUtils.cmyk;
+            args = ColorSpaceUtils.cmyk.getRgb(args, 0);
             fn = OPS.setStrokeRGBColor;
             break;
           case OPS.setFillRGBColor:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
-            args = ColorSpace.singletons.rgb.getRgb(args, 0);
+            stateManager.state.fillColorSpace = ColorSpaceUtils.rgb;
+            args = ColorSpaceUtils.rgb.getRgb(args, 0);
             break;
           case OPS.setStrokeRGBColor:
-            stateManager.state.strokeColorSpace = ColorSpace.singletons.rgb;
-            args = ColorSpace.singletons.rgb.getRgb(args, 0);
+            stateManager.state.strokeColorSpace = ColorSpaceUtils.rgb;
+            args = ColorSpaceUtils.rgb.getRgb(args, 0);
             break;
           case OPS.setFillColorN:
             cs = stateManager.state.patternFillColorSpace;
             if (!cs) {
               if (isNumberArray(args, null)) {
-                args = ColorSpace.singletons.gray.getRgb(args, 0);
+                args = ColorSpaceUtils.gray.getRgb(args, 0);
                 fn = OPS.setFillRGBColor;
                 break;
               }
@@ -2104,7 +2072,7 @@ class PartialEvaluator {
             cs = stateManager.state.patternStrokeColorSpace;
             if (!cs) {
               if (isNumberArray(args, null)) {
-                args = ColorSpace.singletons.gray.getRgb(args, 0);
+                args = ColorSpaceUtils.gray.getRgb(args, 0);
                 fn = OPS.setStrokeRGBColor;
                 break;
               }
@@ -2211,6 +2179,7 @@ class PartialEvaluator {
                     stateManager,
                     localGStateCache,
                     localColorSpaceCache,
+                    seenRefs,
                   })
                   .then(resolveGState, rejectGState);
               }).catch(function (reason) {
@@ -2225,6 +2194,18 @@ class PartialEvaluator {
               })
             );
             return;
+          case OPS.setLineWidth: {
+            // The thickness should be a non-negative number, as per spec.
+            // When the value is negative, Acrobat and Poppler take the absolute
+            // value while PDFium takes the max of 0 and the value.
+            const [thickness] = args;
+            if (typeof thickness !== "number") {
+              warn(`Invalid setLineWidth: ${thickness}`);
+              continue;
+            }
+            args[0] = Math.abs(thickness);
+            break;
+          }
           case OPS.moveTo:
           case OPS.lineTo:
           case OPS.curveTo:
@@ -2232,7 +2213,42 @@ class PartialEvaluator {
           case OPS.curveTo3:
           case OPS.closePath:
           case OPS.rectangle:
-            self.buildPath(operatorList, fn, args, parsingText);
+            self.buildPath(fn, args, stateManager.state);
+            continue;
+          case OPS.stroke:
+          case OPS.closeStroke:
+          case OPS.fill:
+          case OPS.eoFill:
+          case OPS.fillStroke:
+          case OPS.eoFillStroke:
+          case OPS.closeFillStroke:
+          case OPS.closeEOFillStroke:
+          case OPS.endPath: {
+            const {
+              state: { pathBuffer, pathMinMax },
+            } = stateManager;
+            if (
+              fn === OPS.closeStroke ||
+              fn === OPS.closeFillStroke ||
+              fn === OPS.closeEOFillStroke
+            ) {
+              pathBuffer.push(DrawOPS.closePath);
+            }
+            if (pathBuffer.length === 0) {
+              operatorList.addOp(OPS.constructPath, [fn, [null], null]);
+            } else {
+              operatorList.addOp(OPS.constructPath, [
+                fn,
+                [new Float32Array(pathBuffer)],
+                pathMinMax.slice(),
+              ]);
+              pathBuffer.length = 0;
+              pathMinMax.set([Infinity, Infinity, -Infinity, -Infinity], 0);
+            }
+            continue;
+          }
+          case OPS.setTextMatrix:
+            operatorList.addOp(fn, [new Float32Array(args)]);
             continue;
           case OPS.markPoint:
           case OPS.markPointProps:
@@ -2345,7 +2361,19 @@ class PartialEvaluator {
     markedContentData = null,
     disableNormalization = false,
     keepWhiteSpace = false,
+    prevRefs = null,
   }) {
+    const objId = stream.dict?.objId;
+    const seenRefs = new RefSet(prevRefs);
+
+    if (objId) {
+      if (prevRefs?.has(objId)) {
+        throw new Error(
+          `getTextContent - ignoring circular reference: ${objId}`
+        );
+      }
+      seenRefs.put(objId);
+    }
     // Ensure that `resources`/`stateManager` is correctly initialized,
     // even if the provided parameter is e.g. `null`.
     resources ||= Dict.empty;
@@ -2621,16 +2649,12 @@ class PartialEvaluator {
     }
 
     async function handleSetFont(fontName, fontRef) {
-      const translated = await self.loadFont(fontName, fontRef, resources);
-
-      if (translated.font.isType3Font) {
-        try {
-          await translated.loadType3Data(self, resources, task);
-        } catch {
-          // Ignore Type3-parsing errors, since we only use `loadType3Data`
-          // here to ensure that we'll always obtain a useful /FontBBox.
-        }
-      }
+      const translated = await self.loadFont(
+        fontName,
+        fontRef,
+        resources,
+        task
+      );
 
       textState.loadedName = translated.loadedName;
       textState.font = translated.font;
@@ -3276,14 +3300,15 @@ class PartialEvaluator {
                 if (!(xobj instanceof BaseStream)) {
                   throw new FormatError("XObject should be a stream");
                 }
+                const { dict } = xobj;
 
-                const type = xobj.dict.get("Subtype");
+                const type = dict.get("Subtype");
                 if (!(type instanceof Name)) {
                   throw new FormatError("XObject should have a Name subtype");
                 }
 
                 if (type.name !== "Form") {
-                  emptyXObjectCache.set(name, xobj.dict.objId, true);
+                  emptyXObjectCache.set(name, dict.objId, true);
 
                   resolveXObject();
                   return;
@@ -3297,10 +3322,12 @@ class PartialEvaluator {
                 const currentState = stateManager.state.clone();
                 const xObjStateManager = new StateManager(currentState);
 
-                const matrix = lookupMatrix(xobj.dict.getArray("Matrix"), null);
+                const matrix = lookupMatrix(dict.getArray("Matrix"), null);
                 if (matrix) {
                   xObjStateManager.transform(matrix);
                 }
+
+                const localResources = dict.get("Resources");
 
                 // Enqueue the `textContent` chunk before parsing the /Form
                 // XObject.
@@ -3326,7 +3353,10 @@ class PartialEvaluator {
                   .getTextContent({
                     stream: xobj,
                     task,
-                    resources: xobj.dict.get("Resources") || resources,
+                    resources:
+                      localResources instanceof Dict
+                        ? localResources
+                        : resources,
                     stateManager: xObjStateManager,
                     includeMarkedContent,
                     sink: sinkWrapper,
@@ -3336,10 +3366,11 @@ class PartialEvaluator {
                     markedContentData,
                     disableNormalization,
                     keepWhiteSpace,
+                    prevRefs: seenRefs,
                   })
                   .then(function () {
                     if (!sinkWrapper.enqueueInvoked) {
-                      emptyXObjectCache.set(name, xobj.dict.objId, true);
+                      emptyXObjectCache.set(name, dict.objId, true);
                     }
                     resolveXObject();
                   }, rejectXObject);
@@ -4367,7 +4398,7 @@ class PartialEvaluator {
             newProperties
           );
         }
-        return new Font(baseFontName, file, newProperties);
+        return new Font(baseFontName, file, newProperties, this.options);
       }
     }
 
@@ -4559,7 +4590,7 @@ class PartialEvaluator {
     const newProperties = await this.extractDataStructures(dict, properties);
     this.extractWidths(dict, descriptor, newProperties);
 
-    return new Font(fontName.name, fontFile, newProperties);
+    return new Font(fontName.name, fontFile, newProperties, this.options);
   }
 
   static buildFontPaths(font, glyphs, handler, evaluatorOptions) {
@@ -4607,30 +4638,31 @@ class PartialEvaluator {
 }
 
 class TranslatedFont {
-  constructor({ loadedName, font, dict, evaluatorOptions }) {
+  #sent = false;
+
+  #type3Loaded = null;
+
+  constructor({ loadedName, font, dict }) {
     this.loadedName = loadedName;
     this.font = font;
     this.dict = dict;
-    this._evaluatorOptions = evaluatorOptions || DefaultPartialEvaluatorOptions;
-    this.type3Loaded = null;
     this.type3Dependencies = font.isType3Font ? new Set() : null;
-    this.sent = false;
   }
 
   send(handler) {
-    if (this.sent) {
+    if (this.#sent) {
       return;
     }
-    this.sent = true;
+    this.#sent = true;
 
     handler.send("commonobj", [
       this.loadedName,
       "Font",
-      this.font.exportData(this._evaluatorOptions.fontExtraProperties),
+      this.font.exportData(),
     ]);
   }
 
-  fallback(handler) {
+  fallback(handler, evaluatorOptions) {
     if (!this.font.data) {
       return;
     }
@@ -4646,17 +4678,17 @@ class TranslatedFont {
       this.font,
       /* glyphs = */ this.font.glyphCacheValues,
       handler,
-      this._evaluatorOptions
+      evaluatorOptions
     );
   }
 
   loadType3Data(evaluator, resources, task) {
-    if (this.type3Loaded) {
-      return this.type3Loaded;
+    if (this.#type3Loaded) {
+      return this.#type3Loaded;
     }
-    if (!this.font.isType3Font) {
-      throw new Error("Must be a Type3 font.");
-    }
+    const { font, type3Dependencies } = this;
+    assert(font.isType3Font, "Must be a Type3 font.");
+
     // When parsing Type3 glyphs, always ignore them if there are errors.
     // Compared to the parsing of e.g. an entire page, it doesn't really
     // make sense to only be able to render a Type3 glyph partially.
@@ -4668,14 +4700,12 @@ class TranslatedFont {
     }
     type3Evaluator.type3FontRefs = type3FontRefs;
 
-    const translatedFont = this.font,
-      type3Dependencies = this.type3Dependencies;
     let loadCharProcsPromise = Promise.resolve();
     const charProcs = this.dict.get("CharProcs");
     const fontResources = this.dict.get("Resources") || resources;
     const charProcOperatorList = Object.create(null);
 
-    const fontBBox = Util.normalizeRect(translatedFont.bbox || [0, 0, 0, 0]),
+    const fontBBox = Util.normalizeRect(font.bbox || [0, 0, 0, 0]),
       width = fontBBox[2] - fontBBox[0],
       height = fontBBox[3] - fontBBox[1];
     const fontBBoxSize = Math.hypot(width, height);
@@ -4698,8 +4728,15 @@ class TranslatedFont {
             //   not execute any operators that set the colour (or other
             //   colour-related parameters) in the graphics state;
             //   any use of such operators shall be ignored."
-            if (operatorList.fnArray[0] === OPS.setCharWidthAndBounds) {
-              this._removeType3ColorOperators(operatorList, fontBBoxSize);
+            switch (operatorList.fnArray[0]) {
+              case OPS.setCharWidthAndBounds:
+                this.#removeType3ColorOperators(operatorList, fontBBoxSize);
+                break;
+              case OPS.setCharWidth:
+                if (!fontBBoxSize) {
+                  this.#guessType3FontBBox(operatorList);
+                }
+                break;
             }
             charProcOperatorList[key] = operatorList.getIR();
 
@@ -4714,20 +4751,17 @@ class TranslatedFont {
           });
       });
     }
-    this.type3Loaded = loadCharProcsPromise.then(() => {
-      translatedFont.charProcOperatorList = charProcOperatorList;
+    this.#type3Loaded = loadCharProcsPromise.then(() => {
+      font.charProcOperatorList = charProcOperatorList;
       if (this._bbox) {
-        translatedFont.isCharBBox = true;
-        translatedFont.bbox = this._bbox;
+        font.isCharBBox = true;
+        font.bbox = this._bbox;
       }
     });
-    return this.type3Loaded;
+    return this.#type3Loaded;
   }
 
-  /**
-   * @private
-   */
-  _removeType3ColorOperators(operatorList, fontBBoxSize = NaN) {
+  #removeType3ColorOperators(operatorList, fontBBoxSize = NaN) {
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
       assert(
         operatorList.fnArray[0] === OPS.setCharWidthAndBounds,
@@ -4750,13 +4784,8 @@ class TranslatedFont {
       // Override the fontBBox when it's undefined/empty, or when it's at least
       // (approximately) one order of magnitude smaller than the charBBox
       // (fixes issue14999_reduced.pdf).
-      if (!this._bbox) {
-        this._bbox = [Infinity, Infinity, -Infinity, -Infinity];
-      }
-      this._bbox[0] = Math.min(this._bbox[0], charBBox[0]);
-      this._bbox[1] = Math.min(this._bbox[1], charBBox[1]);
-      this._bbox[2] = Math.max(this._bbox[2], charBBox[2]);
-      this._bbox[3] = Math.max(this._bbox[3], charBBox[3]);
+      this._bbox ??= [Infinity, Infinity, -Infinity, -Infinity];
+      Util.rectBoundingBox(...charBBox, this._bbox);
     }
 
     let i = 0,
@@ -4804,6 +4833,29 @@ class TranslatedFont {
             }
             j++;
           }
+          break;
+      }
+      i++;
+    }
+  }
+
+  #guessType3FontBBox(operatorList) {
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+      assert(
+        operatorList.fnArray[0] === OPS.setCharWidth,
+        "Type3 glyph shall start with the d0 operator."
+      );
+    }
+
+    let i = 1;
+    const ii = operatorList.length;
+    while (i < ii) {
+      switch (operatorList.fnArray[i]) {
+        case OPS.constructPath:
+          const minMax = operatorList.argsArray[i][2];
+          // Override the fontBBox when it's undefined/empty (fixes 19624.pdf).
+          this._bbox ??= [Infinity, Infinity, -Infinity, -Infinity];
+          Util.rectBoundingBox(...minMax, this._bbox);
           break;
       }
       i++;
@@ -4903,10 +4955,19 @@ class EvalState {
     this.ctm = new Float32Array(IDENTITY_MATRIX);
     this.font = null;
     this.textRenderingMode = TextRenderingMode.FILL;
-    this._fillColorSpace = ColorSpace.singletons.gray;
-    this._strokeColorSpace = ColorSpace.singletons.gray;
+    this._fillColorSpace = this._strokeColorSpace = ColorSpaceUtils.gray;
     this.patternFillColorSpace = null;
     this.patternStrokeColorSpace = null;
+
+    // Path stuff.
+    this.currentPointX = this.currentPointY = 0;
+    this.pathMinMax = new Float32Array([
+      Infinity,
+      Infinity,
+      -Infinity,
+      -Infinity,
+    ]);
+    this.pathBuffer = [];
   }
 
   get fillColorSpace() {
@@ -4925,8 +4986,18 @@ class EvalState {
     this._strokeColorSpace = this.patternStrokeColorSpace = colorSpace;
   }
 
-  clone() {
-    return Object.create(this);
+  clone({ newPath = false } = {}) {
+    const clone = Object.create(this);
+    if (newPath) {
+      clone.pathBuffer = [];
+      clone.pathMinMax = new Float32Array([
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+      ]);
+    }
+    return clone;
   }
 }
 

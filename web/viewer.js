@@ -68,6 +68,10 @@ function getViewerConfiguration() {
       editorStampParamsToolbar: document.getElementById(
         "editorStampParamsToolbar"
       ),
+      editorSignatureButton: document.getElementById("editorSignatureButton"),
+      editorSignatureParamsToolbar: document.getElementById(
+        "editorSignatureParamsToolbar"
+      ),
       download: document.getElementById("downloadButton"),
     },
     secondaryToolbar: {
@@ -210,6 +214,36 @@ function getViewerConfiguration() {
       ),
       closeButton: document.getElementById("altTextSettingsCloseButton"),
     },
+    addSignatureDialog: {
+      dialog: document.getElementById("addSignatureDialog"),
+      panels: document.getElementById("addSignatureActionContainer"),
+      typeButton: document.getElementById("addSignatureTypeButton"),
+      typeInput: document.getElementById("addSignatureTypeInput"),
+      drawButton: document.getElementById("addSignatureDrawButton"),
+      drawSVG: document.getElementById("addSignatureDraw"),
+      drawPlaceholder: document.getElementById("addSignatureDrawPlaceholder"),
+      drawThickness: document.getElementById("addSignatureDrawThickness"),
+      imageButton: document.getElementById("addSignatureImageButton"),
+      imageSVG: document.getElementById("addSignatureImage"),
+      imagePlaceholder: document.getElementById("addSignatureImagePlaceholder"),
+      imagePicker: document.getElementById("addSignatureFilePicker"),
+      imagePickerLink: document.getElementById("addSignatureImageBrowse"),
+      description: document.getElementById("addSignatureDescription"),
+      clearButton: document.getElementById("clearSignatureButton"),
+      saveContainer: document.getElementById("addSignatureSaveContainer"),
+      saveCheckbox: document.getElementById("addSignatureSaveCheckbox"),
+      errorBar: document.getElementById("addSignatureError"),
+      errorCloseButton: document.getElementById("addSignatureErrorCloseButton"),
+      cancelButton: document.getElementById("addSignatureCancelButton"),
+      addButton: document.getElementById("addSignatureAddButton"),
+    },
+    editSignatureDialog: {
+      dialog: document.getElementById("editSignatureDescriptionDialog"),
+      description: document.getElementById("editSignatureDescription"),
+      editSignatureView: document.getElementById("editSignatureView"),
+      cancelButton: document.getElementById("editSignatureCancelButton"),
+      updateButton: document.getElementById("editSignatureUpdateButton"),
+    },
     annotationEditorParams: {
       editorFreeTextFontSize: document.getElementById("editorFreeTextFontSize"),
       editorFreeTextColor: document.getElementById("editorFreeTextColor"),
@@ -217,12 +251,21 @@ function getViewerConfiguration() {
       editorInkThickness: document.getElementById("editorInkThickness"),
       editorInkOpacity: document.getElementById("editorInkOpacity"),
       editorStampAddImage: document.getElementById("editorStampAddImage"),
+      editorSignatureAddSignature: document.getElementById(
+        "editorSignatureAddSignature"
+      ),
       editorFreeHighlightThickness: document.getElementById(
         "editorFreeHighlightThickness"
       ),
       editorHighlightShowAll: document.getElementById("editorHighlightShowAll"),
     },
     printContainer: document.getElementById("printContainer"),
+    editorUndoBar: {
+      container: document.getElementById("editorUndoBar"),
+      message: document.getElementById("editorUndoBarMessage"),
+      undoButton: document.getElementById("editorUndoBarUndoButton"),
+      closeButton: document.getElementById("editorUndoBarCloseButton"),
+    },
   };
 }
 
@@ -248,7 +291,7 @@ function webViewerLoad() {
     } catch (ex) {
       // The viewer could be in e.g. a cross-origin <iframe> element,
       // fallback to dispatching the event at the current `document`.
-      console.error(`webviewerloaded: ${ex}`);
+      console.error("webviewerloaded:", ex);
       document.dispatchEvent(event);
     }
   }
@@ -269,7 +312,7 @@ if (
 }
 
 export {
+  PDFViewerApplication,
   AppConstants as PDFViewerApplicationConstants,
   AppOptions as PDFViewerApplicationOptions,
-  PDFViewerApplication,
 };

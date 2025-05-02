@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { noContextMenu } from "../display_utils.js";
+import { noContextMenu, stopEvent } from "../display_utils.js";
 
 class EditorToolbar {
   #toolbar = null;
@@ -26,6 +26,8 @@ class EditorToolbar {
 
   #altText = null;
 
+  #signatureDescriptionButton = null;
+
   static #l10nRemove = null;
 
   constructor(editor) {
@@ -36,6 +38,7 @@ class EditorToolbar {
       highlight: "pdfjs-editor-remove-highlight-button",
       ink: "pdfjs-editor-remove-ink-button",
       stamp: "pdfjs-editor-remove-stamp-button",
+      signature: "pdfjs-editor-remove-signature-button",
     });
   }
 
@@ -81,14 +84,12 @@ class EditorToolbar {
 
   #focusIn(e) {
     this.#editor._focusEventsAllowed = false;
-    e.preventDefault();
-    e.stopPropagation();
+    stopEvent(e);
   }
 
   #focusOut(e) {
     this.#editor._focusEventsAllowed = true;
-    e.preventDefault();
-    e.stopPropagation();
+    stopEvent(e);
   }
 
   #addListenersToElement(element) {
@@ -153,6 +154,19 @@ class EditorToolbar {
     const button = colorPicker.renderButton();
     this.#addListenersToElement(button);
     this.#buttons.prepend(button, this.#divider);
+  }
+
+  async addEditSignatureButton(signatureManager) {
+    const button = (this.#signatureDescriptionButton =
+      await signatureManager.renderEditButton(this.#editor));
+    this.#addListenersToElement(button);
+    this.#buttons.prepend(button, this.#divider);
+  }
+
+  updateEditSignatureButton(description) {
+    if (this.#signatureDescriptionButton) {
+      this.#signatureDescriptionButton.title = description;
+    }
   }
 
   remove() {

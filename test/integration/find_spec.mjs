@@ -28,11 +28,11 @@ describe("find bar", () => {
   describe("highlight all", () => {
     let pages;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       pages = await loadAndWait("find_all.pdf", ".textLayer", 100);
     });
 
-    afterAll(async () => {
+    afterEach(async () => {
       await closePages(pages);
     });
 
@@ -89,11 +89,11 @@ describe("find bar", () => {
   describe("highlight all (XFA)", () => {
     let pages;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       pages = await loadAndWait("xfa_imm5257e.pdf", ".xfaLayer");
     });
 
-    afterAll(async () => {
+    afterEach(async () => {
       await closePages(pages);
     });
 
@@ -122,6 +122,33 @@ describe("find bar", () => {
             el => el.textContent
           );
           expect(selectedText).toEqual("Preferences");
+        })
+      );
+    });
+  });
+
+  describe("issue19207.pdf", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("issue19207.pdf", ".textLayer", 200);
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must scroll to the search result text", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          // Search for "40"
+          await page.click("#viewFindButton");
+          await page.waitForSelector("#viewFindButton", { hidden: false });
+          await page.type("#findInput", "40");
+
+          const highlight = await page.waitForSelector(".textLayer .highlight");
+
+          expect(await highlight.isIntersectingViewport()).toBeTrue();
         })
       );
     });

@@ -30,6 +30,25 @@ const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
 const MAX_INT_32 = 2 ** 31 - 1;
 const MIN_INT_32 = -(2 ** 31);
 
+const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
+
+const RESOURCES_KEYS_OPERATOR_LIST = [
+  "ColorSpace",
+  "ExtGState",
+  "Font",
+  "Pattern",
+  "Properties",
+  "Shading",
+  "XObject",
+];
+
+const RESOURCES_KEYS_TEXT_CONTENT = [
+  "ExtGState",
+  "Font",
+  "Properties",
+  "XObject",
+];
+
 function getLookupTableFactory(initializer) {
   let lookup;
   return function () {
@@ -101,6 +120,16 @@ function arrayBuffersToBytes(arr) {
     pos += item.byteLength;
   }
   return data;
+}
+
+async function fetchBinaryData(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch file "${url}" with "${response.statusText}".`
+    );
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 /**
@@ -217,6 +246,10 @@ function readInt8(data, offset) {
   return (data[offset] << 24) >> 24;
 }
 
+function readInt16(data, offset) {
+  return ((data[offset] << 24) | (data[offset + 1] << 16)) >> 16;
+}
+
 function readUint16(data, offset) {
   return (data[offset] << 8) | data[offset + 1];
 }
@@ -270,7 +303,7 @@ function isNumberArray(arr, len) {
   // BigInt64Array/BigUint64Array types (their elements aren't "number").
   return (
     ArrayBuffer.isView(arr) &&
-    (arr.length === 0 || typeof arr[0] === "number") &&
+    !(arr instanceof BigInt64Array || arr instanceof BigUint64Array) &&
     (len === null || arr.length === len)
   );
 }
@@ -701,12 +734,14 @@ export {
   encodeToXmlString,
   escapePDFName,
   escapeString,
+  fetchBinaryData,
   getInheritableProperty,
   getLookupTableFactory,
   getNewAnnotationsMap,
   getParentToUpdate,
   getRotationMatrix,
   getSizeInBytes,
+  IDENTITY_MATRIX,
   isAscii,
   isBooleanArray,
   isNumberArray,
@@ -722,10 +757,13 @@ export {
   ParserEOFException,
   parseXFAPath,
   PDF_VERSION_REGEXP,
+  readInt16,
   readInt8,
   readUint16,
   readUint32,
   recoverJsURL,
+  RESOURCES_KEYS_OPERATOR_LIST,
+  RESOURCES_KEYS_TEXT_CONTENT,
   stringToAsciiOrUTF16BE,
   stringToUTF16HexString,
   stringToUTF16String,

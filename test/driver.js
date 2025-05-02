@@ -20,6 +20,7 @@ const {
   DrawLayer,
   getDocument,
   GlobalWorkerOptions,
+  OutputScale,
   PixelsPerInch,
   shadow,
   TextLayer,
@@ -30,7 +31,9 @@ const { GenericL10n, parseQueryString, SimpleLinkService } = pdfjsViewer;
 
 const WAITING_TIME = 100; // ms
 const CMAP_URL = "/build/generic/web/cmaps/";
+const ICC_URL = "/build/generic/web/iccs/";
 const STANDARD_FONT_DATA_URL = "/build/generic/web/standard_fonts/";
+const WASM_URL = "/build/generic/web/wasm/";
 const IMAGE_RESOURCES_PATH = "/web/images/";
 const VIEWER_CSS = "../build/components/pdf_viewer.css";
 const VIEWER_LOCALE = "en-US";
@@ -105,33 +108,33 @@ async function inlineImages(node, silentErrors = false) {
           }
           return response.blob();
         })
-        // eslint-disable-next-line arrow-body-style
-        .then(blob => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              resolve(reader.result);
-            };
-            reader.onerror = reject;
+        .then(
+          blob =>
+            new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                resolve(reader.result);
+              };
+              reader.onerror = reject;
 
-            reader.readAsDataURL(blob);
-          });
-        })
-        // eslint-disable-next-line arrow-body-style
-        .then(dataUrl => {
-          return new Promise((resolve, reject) => {
-            image.onload = resolve;
-            image.onerror = evt => {
-              if (silentErrors) {
-                resolve();
-                return;
-              }
-              reject(evt);
-            };
+              reader.readAsDataURL(blob);
+            })
+        )
+        .then(
+          dataUrl =>
+            new Promise((resolve, reject) => {
+              image.onload = resolve;
+              image.onerror = evt => {
+                if (silentErrors) {
+                  resolve();
+                  return;
+                }
+                reject(evt);
+              };
 
-            image.src = dataUrl;
-          });
-        })
+              image.src = dataUrl;
+            })
+        )
         .catch(reason => {
           throw new Error(`Error inlining image (${url}): ${reason}`);
         })
@@ -214,6 +217,18 @@ class Rasterize {
     return { svg, foreignObject, style, div };
   }
 
+  static createRootCSS(viewport) {
+    const { scale, userUnit } = viewport;
+    return [
+      ":root {",
+      "  --scale-round-x: 1px; --scale-round-y: 1px;",
+      `  --scale-factor: ${scale};`,
+      `  --user-unit: ${userUnit};`,
+      `  --total-scale-factor: ${scale * userUnit};`,
+      "}",
+    ].join("\n");
+  }
+
   static async annotationLayer(
     ctx,
     viewport,
@@ -231,9 +246,7 @@ class Rasterize {
       div.className = "annotationLayer";
 
       const [common, overrides] = await this.annotationStylePromise;
-      style.textContent =
-        `${common}\n${overrides}\n` +
-        `:root { --scale-factor: ${viewport.scale} }`;
+      style.textContent = `${common}\n${overrides}\n${this.createRootCSS(viewport)}`;
 
       const annotationViewport = viewport.clone({ dontFlip: true });
       const annotationImageMap = await convertCanvasesToImages(
@@ -292,9 +305,7 @@ class Rasterize {
       svg.setAttribute("font-size", 1);
 
       const [common, overrides] = await this.textStylePromise;
-      style.textContent =
-        `${common}\n${overrides}\n` +
-        `:root { --scale-factor: ${viewport.scale} }`;
+      style.textContent = `${common}\n${overrides}\n${this.createRootCSS(viewport)}`;
 
       // Rendering text layer as HTML.
       const textLayer = new TextLayer({
@@ -321,9 +332,7 @@ class Rasterize {
       svg.setAttribute("font-size", 1);
 
       const [common, overrides] = await this.drawLayerStylePromise;
-      style.textContent =
-        `${common}\n${overrides}` +
-        `:root { --scale-factor: ${viewport.scale} }`;
+      style.textContent = `${common}\n${overrides}\n${this.createRootCSS(viewport)}`;
 
       // Rendering text layer as HTML.
       const textLayer = new TextLayer({
@@ -345,9 +354,9 @@ class Rasterize {
         let x = parseFloat(left) / 100;
         let y = parseFloat(top) / 100;
         if (isNaN(x)) {
-          posRegex ||= /^calc\(var\(--scale-factor\)\*(.*)px\)$/;
+          posRegex ||= /^calc\(var\(--total-scale-factor\)\s*\*(.*)px\)$/;
           // The element is tagged so we've to extract the position from the
-          // string, e.g. `calc(var(--scale-factor)*66.32px)`.
+          // string, e.g. `calc(var(--total-scale-factor)*66.32px)`.
           let match = left.match(posRegex);
           if (match) {
             x = parseFloat(match[1]) / pageWidth;
@@ -609,13 +618,6 @@ class Driver {
         return;
       }
 
-      if (task.noChrome && window?.chrome) {
-        this._log(`Skipping file "${task.file}" (because on Chrome)\n`);
-        this.currentTask++;
-        this._nextTask();
-        return;
-      }
-
       this._log('Loading file "' + task.file + '"\n');
 
       try {
@@ -631,25 +633,30 @@ class Driver {
         }
         const isOffscreenCanvasSupported =
           task.isOffscreenCanvasSupported === false ? false : undefined;
+        const disableFontFace = task.disableFontFace === true;
 
         const loadingTask = getDocument({
           url: new URL(task.file, window.location),
           password: task.password,
           cMapUrl: CMAP_URL,
+          iccUrl: ICC_URL,
           standardFontDataUrl: STANDARD_FONT_DATA_URL,
+          wasmUrl: WASM_URL,
           disableAutoFetch: !task.enableAutoFetch,
           pdfBug: true,
           useSystemFonts: task.useSystemFonts,
+          useWasm: task.useWasm,
           useWorkerFetch: task.useWorkerFetch,
           enableXfa: task.enableXfa,
           isOffscreenCanvasSupported,
           styleElement: xfaStyleElement,
+          disableFontFace,
         });
         let promise = loadingTask.promise;
 
         if (task.annotationStorage) {
           for (const annotation of Object.values(task.annotationStorage)) {
-            const { bitmapName, quadPoints } = annotation;
+            const { bitmapName, quadPoints, paths, outlines } = annotation;
             if (bitmapName) {
               promise = promise.then(async doc => {
                 const response = await fetch(
@@ -687,6 +694,36 @@ class Driver {
               // like IRL (in order to avoid bugs like bug 1907958).
               annotation.quadPoints = new Float32Array(quadPoints);
             }
+            if (paths) {
+              for (let i = 0, ii = paths.lines.length; i < ii; i++) {
+                paths.lines[i] = Float32Array.from(
+                  paths.lines[i],
+                  x => x ?? NaN
+                );
+              }
+              for (let i = 0, ii = paths.points.length; i < ii; i++) {
+                paths.points[i] = Float32Array.from(
+                  paths.points[i],
+                  x => x ?? NaN
+                );
+              }
+            }
+            if (outlines) {
+              if (Array.isArray(outlines)) {
+                for (let i = 0, ii = outlines.length; i < ii; i++) {
+                  outlines[i] = Float32Array.from(outlines[i], x => x ?? NaN);
+                }
+              } else {
+                outlines.outline = Float32Array.from(
+                  outlines.outline,
+                  x => x ?? NaN
+                );
+                outlines.points = Float32Array.from(
+                  outlines.points,
+                  x => x ?? NaN
+                );
+              }
+            }
           }
         }
 
@@ -701,7 +738,7 @@ class Driver {
                 await page.getAnnotations({ intent: "display" });
               }
             }
-            doc.annotationStorage.setAll(task.annotationStorage);
+            doc.annotationStorage._setValues(task.annotationStorage);
 
             const data = await doc.saveDocument();
             await loadingTask.destroy();
@@ -840,7 +877,7 @@ class Driver {
           page => {
             // Default to creating the test images at the devices pixel ratio,
             // unless the test explicitly specifies an output scale.
-            const outputScale = task.outputScale || window.devicePixelRatio;
+            const outputScale = task.outputScale || OutputScale.pixelRatio;
             let viewport = page.getViewport({
               scale: PixelsPerInch.PDF_TO_CSS_UNITS,
             });
@@ -882,7 +919,7 @@ class Driver {
               pageColors = null;
 
             if (task.annotationStorage) {
-              task.pdfDoc.annotationStorage.setAll(task.annotationStorage);
+              task.pdfDoc.annotationStorage._setValues(task.annotationStorage);
             }
 
             let textLayerCanvas, annotationLayerCanvas, annotationLayerContext;
@@ -1169,7 +1206,7 @@ class Driver {
         resolve();
       })
       .catch(reason => {
-        console.warn(`Driver._send failed (${url}): ${reason}`);
+        console.warn(`Driver._send failed (${url}):`, reason);
 
         this.inFlightRequests--;
         resolve();

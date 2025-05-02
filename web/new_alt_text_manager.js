@@ -440,9 +440,7 @@ class NewAltTextManager {
   }
 
   #finish() {
-    if (this.#overlayManager.active === this.#dialog) {
-      this.#overlayManager.close(this.#dialog);
-    }
+    this.#overlayManager.closeIfActive(this.#dialog);
   }
 
   #close() {
@@ -460,6 +458,15 @@ class NewAltTextManager {
     this.#uiManager = null;
   }
 
+  #extractWords(text) {
+    return new Set(
+      text
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/gu)
+        .filter(x => !!x)
+    );
+  }
+
   #save() {
     const altText = this.#textarea.value.trim();
     this.#currentEditor.altTextData = {
@@ -469,8 +476,8 @@ class NewAltTextManager {
     this.#currentEditor.altTextData.guessedAltText = this.#guessedAltText;
 
     if (this.#guessedAltText && this.#guessedAltText !== altText) {
-      const guessedWords = new Set(this.#guessedAltText.split(/\s+/));
-      const words = new Set(altText.split(/\s+/));
+      const guessedWords = this.#extractWords(this.#guessedAltText);
+      const words = this.#extractWords(altText);
       this.#currentEditor._reportTelemetry({
         action: "pdfjs.image.alt_text.user_edit",
         data: {
@@ -687,9 +694,7 @@ class ImageAltTextSettings {
   }
 
   #finish() {
-    if (this.#overlayManager.active === this.#dialog) {
-      this.#overlayManager.close(this.#dialog);
-    }
+    this.#overlayManager.closeIfActive(this.#dialog);
   }
 }
 
