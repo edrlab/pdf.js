@@ -5,7 +5,7 @@ export class FreeDrawOutline extends Outline {
         outline: any[];
         points: any[][];
     };
-    get box(): Float32Array;
+    get box(): Float32Array<ArrayBuffer>;
     newOutliner(point: any, box: any, scaleFactor: any, thickness: any, isLTR: any, innerMargin?: number): FreeDrawOutliner;
     getNewOutline(thickness: any, innerMargin: any): FreeDrawOutline;
     #private;

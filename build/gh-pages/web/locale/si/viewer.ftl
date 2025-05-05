@@ -182,7 +182,7 @@ pdfjs-find-highlight-checkbox = සියල්ල උද්දීපනය
 pdfjs-find-entire-word-checkbox-label = සමස්ත වචන
 pdfjs-find-reached-top = ලේඛනයේ මුදුනට ළඟා විය, පහළ සිට ඉහළට
 pdfjs-find-reached-bottom = ලේඛනයේ අවසානයට ළඟා විය, ඉහළ සිට පහළට
-pdfjs-find-not-found = වැකිකඩ හමු නොවිණි
+pdfjs-find-not-found = වැකිකඩ හමු නොවුණි
 
 ## Predefined zoom values
 
@@ -234,6 +234,9 @@ pdfjs-editor-stamp-button =
     .title = රූප සංස්කරණය හෝ එක් කරන්න
 pdfjs-editor-stamp-button-label = රූප සංස්කරණය හෝ එක් කරන්න
 
+## Default editor aria labels
+
+
 ## Remove button for the various kind of editor.
 
 
@@ -268,4 +271,31 @@ pdfjs-editor-alt-text-mark-decorative-description = මෙය දාර හෝ �
 
 
 ## Image alt-text settings
+
+
+## "Annotations removed" bar
+
+
+## Add a signature dialog
+
+
+## Tab names
+
+
+## Tab panels
+
+
+## Controls
+
+
+## Dialog buttons
+
+
+## Main menu for adding/removing signatures
+
+
+## Editor toolbar
+
+
+## Edit signature description dialog
 

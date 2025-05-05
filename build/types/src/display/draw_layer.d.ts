@@ -4,8 +4,9 @@
  * be able to use mix-blend-mode for some of them.
  */
 export class DrawLayer {
+    static "__#33@#id": number;
     static get _svgFactory(): any;
-    static "__#27@#setBox"(element: any, [x, y, width, height]: [any, any, any, any]): void;
+    static "__#33@#setBox"(element: any, [x, y, width, height]: [any, any, any, any]): void;
     constructor({ pageIndex }: {
         pageIndex: any;
     });
@@ -17,12 +18,8 @@ export class DrawLayer {
     };
     drawOutline(properties: any, mustRemoveSelfIntersections: any): number;
     finalizeDraw(id: any, properties: any): void;
-    updateProperties(elementOrId: any, { root, bbox, rootClass, path }: {
-        root: any;
-        bbox: any;
-        rootClass: any;
-        path: any;
-    }): void;
+    updateProperties(elementOrId: any, properties: any): void;
+    updateParent(id: any, layer: any): void;
     remove(id: any): void;
     destroy(): void;
     #private;

@@ -31,6 +31,7 @@ export class HighlightEditor extends AnnotationEditor {
     static deserialize(data: any, parent: any, uiManager: any): Promise<AnnotationEditor | null>;
     constructor(params: any);
     color: any;
+    defaultL10nId: string;
     /** @inheritdoc */
     get telemetryInitialData(): {
         action: string;
@@ -54,6 +55,8 @@ export class HighlightEditor extends AnnotationEditor {
     fixAndSetPosition(): void;
     /** @inheritdoc */
     getRect(tx: any, ty: any): any[];
+    /** @inheritdoc */
+    onceAdded(focus: any): void;
     /** @inheritdoc */
     rotate(angle: any): void;
     pointerover(): void;
