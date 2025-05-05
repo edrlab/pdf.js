@@ -1347,12 +1347,12 @@ const PDFViewerApplication = {
       .getMultiple({
         page: null,
         zoom: DEFAULT_SCALE_VALUE,
-        scrollLeft: "0",
-        scrollTop: "0",
+        scrollLeft: 0,
+        scrollTop: 857, // MAX page scroll
         rotation: null,
-        sidebarView: SidebarView.UNKNOWN,
-        scrollMode: ScrollMode.UNKNOWN,
-        spreadMode: SpreadMode.UNKNOWN,
+        sidebarView: SidebarView.NONE,
+        scrollMode: ScrollMode.VERTICAL,
+        spreadMode: SpreadMode.NONE,
       })
       .catch(() => {
         /* Unable to read from storage; ignoring errors. */
@@ -1990,6 +1990,7 @@ const PDFViewerApplication = {
     // eventBus._on("download", this.downloadOrSave.bind(this), opts);
     eventBus._on("firstpage", () => (this.page = 1), opts);
     eventBus._on("lastpage", () => (this.page = this.pagesCount), opts);
+    eventBus._on("__setPageNumber", (page) => (this.page = page), opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus._on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus._on("zoomin", this.zoomIn.bind(this), opts);

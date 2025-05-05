@@ -24,36 +24,36 @@ const DEFAULT_VIEW_HISTORY_CACHE_SIZE = 20;
  *  - MOZCENTRAL        - uses sessionStorage.
  *  - GENERIC or CHROME - uses localStorage, if it is available.
  */
-class ViewHistory {
-  constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
-    this.fingerprint = fingerprint;
-    this.cacheSize = cacheSize;
+class ViewHistory_ {
+  // constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
+  //   this.fingerprint = fingerprint;
+  //   this.cacheSize = cacheSize;
 
-    this._initializedPromise = this._readFromStorage().then(databaseStr => {
-      const database = JSON.parse(databaseStr || "{}");
-      let index = -1;
-      if (!Array.isArray(database.files)) {
-        database.files = [];
-      } else {
-        while (database.files.length >= this.cacheSize) {
-          database.files.shift();
-        }
+  //   this._initializedPromise = this._readFromStorage().then(databaseStr => {
+  //     const database = JSON.parse(databaseStr || "{}");
+  //     let index = -1;
+  //     if (!Array.isArray(database.files)) {
+  //       database.files = [];
+  //     } else {
+  //       while (database.files.length >= this.cacheSize) {
+  //         database.files.shift();
+  //       }
 
-        for (let i = 0, ii = database.files.length; i < ii; i++) {
-          const branch = database.files[i];
-          if (branch.fingerprint === this.fingerprint) {
-            index = i;
-            break;
-          }
-        }
-      }
-      if (index === -1) {
-        index = database.files.push({ fingerprint: this.fingerprint }) - 1;
-      }
-      this.file = database.files[index];
-      this.database = database;
-    });
-  }
+  //       for (let i = 0, ii = database.files.length; i < ii; i++) {
+  //         const branch = database.files[i];
+  //         if (branch.fingerprint === this.fingerprint) {
+  //           index = i;
+  //           break;
+  //         }
+  //       }
+  //     }
+  //     if (index === -1) {
+  //       index = database.files.push({ fingerprint: this.fingerprint }) - 1;
+  //     }
+  //     this.file = database.files[index];
+  //     this.database = database;
+  //   });
+  // }
 
   async _writeToStorage() {
     const databaseStr = JSON.stringify(this.database);
@@ -101,6 +101,27 @@ class ViewHistory {
       values[name] = val !== undefined ? val : properties[name];
     }
     return values;
+  }
+}
+
+
+class ViewHistory extends ViewHistory_ {
+  constructor(_fingerprint) {
+    super();
+    
+    this.file = this._readFromStorage();
+    this._initializedPromise = Promise.resolve();
+  }
+  _writeToStorage() {
+    if (window.pdfjsEventBus) {
+      window.pdfjsEventBus.dispatch("__savePreferences", this.file)
+    }
+  }
+  _readFromStorage() {
+    const b64dataURIEncoded = window.location.search.split("&thoriumpdfdata=")[1];
+    const b64dataURIDecoded = decodeURIComponent(b64dataURIEncoded);
+    const data = JSON.parse(atob(b64dataURIDecoded));
+    return data;
   }
 }
 
