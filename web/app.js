@@ -2357,7 +2357,7 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       return;
     }
     const fileOrigin = URL.parse(file, window.location)?.origin;
-    if (fileOrigin === viewerOrigin) {
+    if (fileOrigin === viewerOrigin || fileOrigin === "null") {
       return;
     }
     const ex = new Error("file origin does not match viewer's");
