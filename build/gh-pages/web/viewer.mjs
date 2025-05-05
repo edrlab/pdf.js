@@ -11595,7 +11595,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.136";
+    const viewerVersion = "5.2.140";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -14618,36 +14618,7 @@ class Toolbar {
 
 ;// ./web/view_history.js
 const DEFAULT_VIEW_HISTORY_CACHE_SIZE = 20;
-class ViewHistory {
-  constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
-    this.fingerprint = fingerprint;
-    this.cacheSize = cacheSize;
-    this._initializedPromise = this._readFromStorage().then(databaseStr => {
-      const database = JSON.parse(databaseStr || "{}");
-      let index = -1;
-      if (!Array.isArray(database.files)) {
-        database.files = [];
-      } else {
-        while (database.files.length >= this.cacheSize) {
-          database.files.shift();
-        }
-        for (let i = 0, ii = database.files.length; i < ii; i++) {
-          const branch = database.files[i];
-          if (branch.fingerprint === this.fingerprint) {
-            index = i;
-            break;
-          }
-        }
-      }
-      if (index === -1) {
-        index = database.files.push({
-          fingerprint: this.fingerprint
-        }) - 1;
-      }
-      this.file = database.files[index];
-      this.database = database;
-    });
-  }
+class ViewHistory_ {
   async _writeToStorage() {
     const databaseStr = JSON.stringify(this.database);
     localStorage.setItem("pdfjs.history", databaseStr);
@@ -14680,6 +14651,30 @@ class ViewHistory {
       values[name] = val !== undefined ? val : properties[name];
     }
     return values;
+  }
+}
+class ViewHistory extends ViewHistory_ {
+  constructor(_fingerprint) {
+    super();
+    this.file = this._readFromStorage();
+    this._initializedPromise = Promise.resolve();
+  }
+  _writeToStorage() {
+    if (window.pdfjsEventBus) {
+      window.pdfjsEventBus.dispatch("__savePreferences", this.file);
+    }
+  }
+  _readFromStorage() {
+    try {
+      const b64dataURIEncoded = window.location.search.split("&thoriumpdfdata=")[1];
+      const b64dataURIDecoded = decodeURIComponent(b64dataURIEncoded);
+      const data = JSON.parse(atob(b64dataURIDecoded));
+      return data;
+    } catch {
+      return {
+        page: 1
+      };
+    }
   }
 }
 
@@ -15501,12 +15496,12 @@ const PDFViewerApplication = {
     const storedPromise = (this.store = new ViewHistory(pdfDocument.fingerprints[0])).getMultiple({
       page: null,
       zoom: DEFAULT_SCALE_VALUE,
-      scrollLeft: "0",
-      scrollTop: "0",
+      scrollLeft: 0,
+      scrollTop: 857,
       rotation: null,
-      sidebarView: SidebarView.UNKNOWN,
-      scrollMode: ScrollMode.UNKNOWN,
-      spreadMode: SpreadMode.UNKNOWN
+      sidebarView: SidebarView.NONE,
+      scrollMode: ScrollMode.VERTICAL,
+      spreadMode: SpreadMode.NONE
     }).catch(() => {});
     firstPagePromise.then(pdfPage => {
       this.loadingBar?.setWidth(this.appConfig.viewerContainer);
@@ -15938,6 +15933,7 @@ const PDFViewerApplication = {
     eventBus._on("switchannotationeditormode", evt => pdfViewer.annotationEditorMode = evt, opts);
     eventBus._on("firstpage", () => this.page = 1, opts);
     eventBus._on("lastpage", () => this.page = this.pagesCount, opts);
+    eventBus._on("__setPageNumber", page => this.page = page, opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus._on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus._on("zoomin", this.zoomIn.bind(this), opts);
@@ -16161,10 +16157,24 @@ initCom(PDFViewerApplication);
   PDFPrintServiceFactory.initGlobals(PDFViewerApplication);
 }
 {
+  const HOSTED_VIEWER_ORIGINS = new Set(["null", "http://mozilla.github.io", "https://mozilla.github.io"]);
   var validateFileURL = function (file) {
     if (!file) {
       return;
     }
+    const viewerOrigin = URL.parse(window.location)?.origin || "null";
+    if (HOSTED_VIEWER_ORIGINS.has(viewerOrigin)) {
+      return;
+    }
+    const fileOrigin = URL.parse(file, window.location)?.origin;
+    if (fileOrigin === viewerOrigin || fileOrigin === "null") {
+      return;
+    }
+    const ex = new Error("file origin does not match viewer's");
+    PDFViewerApplication._documentError("pdfjs-loading-error", {
+      message: ex.message
+    });
+    throw ex;
   };
   var onFileInputChange = function (evt) {
     if (this.pdfViewer?.isInPresentationMode) {
@@ -16744,8 +16754,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.136";
-const pdfjsBuild = "166c3517f";
+const pdfjsVersion = "5.2.140";
+const pdfjsBuild = "52efca7d9";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,
