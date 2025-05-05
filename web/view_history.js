@@ -118,10 +118,15 @@ class ViewHistory extends ViewHistory_ {
     }
   }
   _readFromStorage() {
-    const b64dataURIEncoded = window.location.search.split("&thoriumpdfdata=")[1];
-    const b64dataURIDecoded = decodeURIComponent(b64dataURIEncoded);
-    const data = JSON.parse(atob(b64dataURIDecoded));
-    return data;
+
+    try {
+      const b64dataURIEncoded = window.location.search.split("&thoriumpdfdata=")[1];
+      const b64dataURIDecoded = decodeURIComponent(b64dataURIEncoded);
+      const data = JSON.parse(atob(b64dataURIDecoded));
+      return data;
+    } catch {
+      return { page: 1 };
+    }
   }
 }
 
