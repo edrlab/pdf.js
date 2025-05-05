@@ -66,6 +66,8 @@ git checkout master2
 
 npm i && npm run build
 
+git checkout build
+
 git add build/gh-pages/build build/gh-pages/web build/types -f
 
 cat << EOF > package.json
