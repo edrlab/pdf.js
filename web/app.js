@@ -1934,7 +1934,8 @@ const PDFViewerApplication = {
   },
 
   requestPresentationMode() {
-    this.pdfPresentationMode?.request();
+    // THORIUM_BUILD
+    // this.pdfPresentationMode?.request();
   },
 
   triggerPrinting() {
