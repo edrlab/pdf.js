@@ -11595,7 +11595,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.140";
+    const viewerVersion = "5.2.143";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -15894,9 +15894,7 @@ const PDFViewerApplication = {
   rotatePages(delta) {
     this.pdfViewer.pagesRotation += delta;
   },
-  requestPresentationMode() {
-    this.pdfPresentationMode?.request();
-  },
+  requestPresentationMode() {},
   triggerPrinting() {
     if (this.supportsPrinting) {
       window.print();
@@ -16754,8 +16752,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.140";
-const pdfjsBuild = "52efca7d9";
+const pdfjsVersion = "5.2.143";
+const pdfjsBuild = "dd4efe325";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,
