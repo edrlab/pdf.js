@@ -7572,7 +7572,8 @@ class PDFPrintService {
     pagesOverview,
     printContainer,
     printResolution,
-    printAnnotationStoragePromise = null
+    printAnnotationStoragePromise = null,
+    printRanges = []
   }) {
     this.pdfDocument = pdfDocument;
     this.pagesOverview = pagesOverview;
@@ -7584,6 +7585,7 @@ class PDFPrintService {
     this._printAnnotationStoragePromise = printAnnotationStoragePromise || Promise.resolve();
     this.currentPage = -1;
     this.scratchCanvas = document.createElement("canvas");
+    this.printRanges = printRanges;
   }
   layout() {
     this.throwIfInactive();
@@ -7634,7 +7636,12 @@ class PDFPrintService {
       }
       const index = this.currentPage;
       renderProgress(index, pageCount);
-      renderPage(this, this.pdfDocument, index + 1, this.pagesOverview[index], this._printResolution, this._optionalContentConfigPromise, this._printAnnotationStoragePromise).then(this.useRenderedPage.bind(this)).then(function () {
+      const pageNumber = index + 1;
+      let p = Promise.resolve();
+      if (!this.printRanges || this.printRanges.length === 0 || this.printRanges.includes(pageNumber)) {
+        p = renderPage(this, this.pdfDocument, pageNumber, this.pagesOverview[index], this._printResolution, this._optionalContentConfigPromise, this._printAnnotationStoragePromise).then(this.useRenderedPage.bind(this));
+      }
+      p.then(function () {
         renderNextPage(resolve, reject);
       }, reject);
     };
@@ -7739,7 +7746,6 @@ function renderProgress(index, total) {
 }
 window.addEventListener("keydown", function (event) {
   if (event.keyCode === 80 && (event.ctrlKey || event.metaKey) && !event.altKey && (!event.shiftKey || window.chrome || window.opera)) {
-    window.print();
     event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -7772,7 +7778,7 @@ class PDFPrintServiceFactory {
     viewerApp = app;
   }
   static get supportsPrinting() {
-    return false;
+    return shadow(this, "supportsPrinting", true);
   }
   static createPrintService(params) {
     if (activeService) {
@@ -9106,14 +9112,12 @@ class PDFThumbnailViewer {
     return this.scroll.down;
   }
   forceRendering() {
-    const visibleThumbs = this.#getVisibleThumbs();
-    const scrollAhead = this.#getScrollAhead(visibleThumbs);
-    const thumbView = this.renderingQueue.getHighestPriority(visibleThumbs, this._thumbnails, scrollAhead, false, true);
-    if (thumbView) {
-      this.#ensurePdfPageLoaded(thumbView).then(() => {
-        this.renderingQueue.renderView(thumbView);
-      });
-      return true;
+    for (const thumbView of this._thumbnails) {
+      if (thumbView) {
+        this.#ensurePdfPageLoaded(thumbView).then(() => {
+          this.renderingQueue.renderView(thumbView);
+        });
+      }
     }
     return false;
   }
@@ -11595,7 +11599,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.143";
+    const viewerVersion = "5.2.144";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -15861,7 +15865,8 @@ const PDFViewerApplication = {
       pagesOverview: this.pdfViewer.getPagesOverview(),
       printContainer: this.appConfig.printContainer,
       printResolution: AppOptions.get("printResolution"),
-      printAnnotationStoragePromise: this._printAnnotationStoragePromise
+      printAnnotationStoragePromise: this._printAnnotationStoragePromise,
+      printRanges: this._printRanges
     });
     this.forceRendering();
     this.setTitle();
@@ -15895,8 +15900,10 @@ const PDFViewerApplication = {
     this.pdfViewer.pagesRotation += delta;
   },
   requestPresentationMode() {},
-  triggerPrinting() {
+  triggerPrinting(printRanges) {
     if (this.supportsPrinting) {
+      this._printRanges = printRanges;
+      console.log(`THORIUM_BUILD startPrinting with printRanges=${this._printRanges}`);
       window.print();
     }
   },
@@ -15915,8 +15922,19 @@ const PDFViewerApplication = {
       pdfViewer,
       preferences
     } = this;
+    let once = true;
+    eventBus._on("__thumbnailInit", () => {
+      console.log(`THORIUM_BUILD startThumbnailInit=${once}`);
+      if (once) {
+        once = false;
+        this.pdfRenderingQueue.isThumbnailViewEnabled = true;
+        this.pdfRenderingQueue.renderHighestPriority();
+      }
+    });
     eventBus._on("resize", onResize.bind(this), opts);
     eventBus._on("hashchange", onHashchange.bind(this), opts);
+    eventBus._on("beforeprint", this.beforePrint.bind(this), opts);
+    eventBus._on("afterprint", this.afterPrint.bind(this), opts);
     eventBus._on("pagerender", onPageRender.bind(this), opts);
     eventBus._on("pagerendered", onPageRendered.bind(this), opts);
     eventBus._on("updateviewarea", onUpdateViewarea.bind(this), opts);
@@ -15929,6 +15947,7 @@ const PDFViewerApplication = {
     eventBus._on("presentationmodechanged", evt => pdfViewer.presentationModeState = evt.state, opts);
     eventBus._on("presentationmode", this.requestPresentationMode.bind(this), opts);
     eventBus._on("switchannotationeditormode", evt => pdfViewer.annotationEditorMode = evt, opts);
+    eventBus._on("print", this.triggerPrinting.bind(this), opts);
     eventBus._on("firstpage", () => this.page = 1, opts);
     eventBus._on("lastpage", () => this.page = this.pagesCount, opts);
     eventBus._on("__setPageNumber", page => this.page = page, opts);
@@ -16752,8 +16771,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.143";
-const pdfjsBuild = "dd4efe325";
+const pdfjsVersion = "5.2.144";
+const pdfjsBuild = "113d6afdf";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,
