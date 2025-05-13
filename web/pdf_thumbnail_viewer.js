@@ -299,22 +299,26 @@ class PDFThumbnailViewer {
   }
 
   forceRendering() {
-    const visibleThumbs = this.#getVisibleThumbs();
-    const scrollAhead = this.#getScrollAhead(visibleThumbs);
-    const thumbView = this.renderingQueue.getHighestPriority(
-      visibleThumbs,
-      this._thumbnails,
-      scrollAhead,
-      /* preRenderExtra */ false,
-      /* ignoreDetailViews */ true
-    );
-    if (thumbView) {
-      this.#ensurePdfPageLoaded(thumbView).then(() => {
-        this.renderingQueue.renderView(thumbView);
-      });
-      return true;
+
+    // THORIUM_BUILD disable thumbnail rendering on dom visibility
+    // const visibleThumbs = this.#getVisibleThumbs();
+    // const scrollAhead = this.#getScrollAhead(visibleThumbs);
+    // const thumbView = this.renderingQueue.getHighestPriority(
+    //   visibleThumbs,
+    //   this._thumbnails,
+    //   scrollAhead,
+    //   /* preRenderExtra */ false,
+    //   /* ignoreDetailViews */ true
+    // );
+    for (const thumbView of this._thumbnails) {
+      if (thumbView) {
+        this.#ensurePdfPageLoaded(thumbView).then(() => {
+          this.renderingQueue.renderView(thumbView);
+        });
+        // return true;
+      }
     }
-    return false;
+    return false; // never expected
   }
 }
 

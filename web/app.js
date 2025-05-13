@@ -1890,6 +1890,8 @@ const PDFViewerApplication = {
       printContainer: this.appConfig.printContainer,
       printResolution: AppOptions.get("printResolution"),
       printAnnotationStoragePromise: this._printAnnotationStoragePromise,
+      // THORIUM_BUILD
+      printRanges: this._printRanges,
     });
     this.forceRendering();
     // Disable the editor-indicator during printing (fixes bug 1790552).
@@ -1938,8 +1940,11 @@ const PDFViewerApplication = {
     // this.pdfPresentationMode?.request();
   },
 
-  triggerPrinting() {
+  // THORIUM_BUILD
+  triggerPrinting(printRanges) {
     if (this.supportsPrinting) {
+      this._printRanges = printRanges;
+      console.log(`THORIUM_BUILD startPrinting with printRanges=${this._printRanges}`);
       window.print();
     }
   },
@@ -1959,10 +1964,20 @@ const PDFViewerApplication = {
       preferences,
     } = this;
 
+    // THORIUM_BUILD
+    let once = true;
+    eventBus._on("__thumbnailInit", () => {
+      console.log(`THORIUM_BUILD startThumbnailInit=${once}`);
+      if (once) {
+        once = false;
+        this.pdfRenderingQueue.isThumbnailViewEnabled = true;
+        this.pdfRenderingQueue.renderHighestPriority();
+      }
+    });
     eventBus._on("resize", onResize.bind(this), opts);
     eventBus._on("hashchange", onHashchange.bind(this), opts);
-    // eventBus._on("beforeprint", this.beforePrint.bind(this), opts);
-    // eventBus._on("afterprint", this.afterPrint.bind(this), opts);
+    eventBus._on("beforeprint", this.beforePrint.bind(this), opts);
+    eventBus._on("afterprint", this.afterPrint.bind(this), opts);
     eventBus._on("pagerender", onPageRender.bind(this), opts);
     eventBus._on("pagerendered", onPageRendered.bind(this), opts);
     eventBus._on("updateviewarea", onUpdateViewarea.bind(this), opts);
@@ -1987,7 +2002,7 @@ const PDFViewerApplication = {
       evt => (pdfViewer.annotationEditorMode = evt),
       opts
     );
-    // eventBus._on("print", this.triggerPrinting.bind(this), opts);
+    eventBus._on("print", this.triggerPrinting.bind(this), opts);
     // eventBus._on("download", this.downloadOrSave.bind(this), opts);
     eventBus._on("firstpage", () => (this.page = 1), opts);
     eventBus._on("lastpage", () => (this.page = this.pagesCount), opts);
