@@ -9112,12 +9112,14 @@ class PDFThumbnailViewer {
     return this.scroll.down;
   }
   forceRendering() {
-    for (const thumbView of this._thumbnails) {
-      if (thumbView) {
-        this.#ensurePdfPageLoaded(thumbView).then(() => {
-          this.renderingQueue.renderView(thumbView);
-        });
-      }
+    const visibleThumbs = this.#getVisibleThumbs();
+    const scrollAhead = this.#getScrollAhead(visibleThumbs);
+    const thumbView = this.renderingQueue.getHighestPriority(visibleThumbs, this._thumbnails, scrollAhead, false, true);
+    if (thumbView) {
+      this.#ensurePdfPageLoaded(thumbView).then(() => {
+        this.renderingQueue.renderView(thumbView);
+      });
+      return true;
     }
     return false;
   }
@@ -11599,7 +11601,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.144";
+    const viewerVersion = "5.2.145";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -15922,14 +15924,38 @@ const PDFViewerApplication = {
       pdfViewer,
       preferences
     } = this;
-    let once = true;
-    eventBus._on("__thumbnailInit", () => {
-      console.log(`THORIUM_BUILD startThumbnailInit=${once}`);
-      if (once) {
-        once = false;
-        this.pdfRenderingQueue.isThumbnailViewEnabled = true;
-        this.pdfRenderingQueue.renderHighestPriority();
+    const handler = async pageIndexZeroBased => {
+      console.log(`THORIUM_BUILD __thumbnailPageRequest=${pageIndexZeroBased}`);
+      const thumbView = this.pdfThumbnailViewer._thumbnails[pageIndexZeroBased];
+      if (!thumbView) {
+        return;
       }
+      try {
+        if (!thumbView.pdfPage) {
+          const pdfPage = await this.pdfDocument.getPage(thumbView.id);
+          if (!thumbView.pdfPage) {
+            thumbView.setPdfPage(pdfPage);
+          }
+        }
+      } catch (reason) {
+        console.error("Unable to get page for thumb view", reason);
+      }
+      await new Promise(resolve => {
+        const eventHandler = ({
+          source
+        }) => {
+          if (source === thumbView) {
+            eventBus._off("thumbnailrendered", eventHandler);
+            resolve();
+          }
+        };
+        eventBus._on("thumbnailrendered", eventHandler);
+        this.pdfRenderingQueue.renderView(thumbView);
+      });
+    };
+    let handlerPromise = Promise.resolve();
+    eventBus._on("__thumbnailPageRequest", pageIndexZeroBased => {
+      handlerPromise = handlerPromise.then(() => handler(pageIndexZeroBased));
     });
     eventBus._on("resize", onResize.bind(this), opts);
     eventBus._on("hashchange", onHashchange.bind(this), opts);
@@ -16771,8 +16797,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.144";
-const pdfjsBuild = "113d6afdf";
+const pdfjsVersion = "5.2.145";
+const pdfjsBuild = "f35c5aac1";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,
