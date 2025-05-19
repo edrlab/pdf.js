@@ -1965,14 +1965,41 @@ const PDFViewerApplication = {
     } = this;
 
     // THORIUM_BUILD
-    let once = true;
-    eventBus._on("__thumbnailInit", () => {
-      console.log(`THORIUM_BUILD startThumbnailInit=${once}`);
-      if (once) {
-        once = false;
-        this.pdfRenderingQueue.isThumbnailViewEnabled = true;
-        this.pdfRenderingQueue.renderHighestPriority();
+    const handler = async (pageIndexZeroBased) => {
+      console.log(`THORIUM_BUILD __thumbnailPageRequest=${pageIndexZeroBased}`);
+
+      // reference class PDFThumbnailViewer -> #ensurePdfPageLoaded
+      // https://github.com/edrlab/pdf.js/blob/113d6afdf09dafd1e66c8416e2614e02fd0d2e51/web/pdf_thumbnail_viewer.js#L276
+      const thumbView = this.pdfThumbnailViewer._thumbnails[pageIndexZeroBased];
+      if (!thumbView) {
+        return;
       }
+      try {
+        if (!thumbView.pdfPage) {
+          const pdfPage = await this.pdfDocument.getPage(thumbView.id);
+          if (!thumbView.pdfPage) {
+            thumbView.setPdfPage(pdfPage);
+          }
+        }
+      } catch (reason) {
+        console.error("Unable to get page for thumb view", reason);
+      }
+
+      await new Promise((resolve) => {
+        const eventHandler = ({ source }) => {
+          if (source === thumbView) {
+            eventBus._off("thumbnailrendered", eventHandler);
+            resolve();
+          }
+        };
+        eventBus._on("thumbnailrendered", eventHandler);
+        this.pdfRenderingQueue.renderView(thumbView);
+      });
+
+    };
+    let handlerPromise = Promise.resolve();
+    eventBus._on("__thumbnailPageRequest", (pageIndexZeroBased) => {
+      handlerPromise = handlerPromise.then(() => handler(pageIndexZeroBased));
     });
     eventBus._on("resize", onResize.bind(this), opts);
     eventBus._on("hashchange", onHashchange.bind(this), opts);
