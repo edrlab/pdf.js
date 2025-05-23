@@ -11601,7 +11601,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.145";
+    const viewerVersion = "5.2.146";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -15976,7 +15976,7 @@ const PDFViewerApplication = {
     eventBus._on("print", this.triggerPrinting.bind(this), opts);
     eventBus._on("firstpage", () => this.page = 1, opts);
     eventBus._on("lastpage", () => this.page = this.pagesCount, opts);
-    eventBus._on("__setPageNumber", page => this.page = page, opts);
+    eventBus._on("__setPageLabelOrPageNumber", page => this.pdfLinkService.goToPage(page), opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus._on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus._on("zoomin", this.zoomIn.bind(this), opts);
@@ -16797,8 +16797,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.145";
-const pdfjsBuild = "f35c5aac1";
+const pdfjsVersion = "5.2.146";
+const pdfjsBuild = "ea36ba12e";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,
