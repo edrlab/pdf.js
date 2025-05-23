@@ -2033,7 +2033,7 @@ const PDFViewerApplication = {
     // eventBus._on("download", this.downloadOrSave.bind(this), opts);
     eventBus._on("firstpage", () => (this.page = 1), opts);
     eventBus._on("lastpage", () => (this.page = this.pagesCount), opts);
-    eventBus._on("__setPageNumber", (page) => (this.page = page), opts);
+    eventBus._on("__setPageLabelOrPageNumber", (page) => (this.pdfLinkService.goToPage(page)), opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus._on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus._on("zoomin", this.zoomIn.bind(this), opts);
