@@ -889,6 +889,15 @@ class PDFViewer {
     };
     eventBus._on("pagerendered", onAfterDraw, { signal });
 
+
+    eventBus._on("__highlightSelection", () => {
+      console.log("THORIUM_BUILD HighlightSelection");
+
+      if (this.#annotationEditorUIManager) {
+        this.#annotationEditorUIManager.highlightSelection();
+      }
+    });
+
     // Fetch a single page so we can get a viewport that will be the default
     // viewport for all pages
     Promise.all([firstPagePromise, permissionsPromise])

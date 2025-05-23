@@ -46,6 +46,8 @@ class HighlightOutliner {
     const NUMBER_OF_DIGITS = 4;
     const EPSILON = 10 ** -NUMBER_OF_DIGITS;
 
+    console.log("HighlightOutliner BOXES", boxes);
+
     // The coordinates of the boxes are in the page coordinate system.
     for (const { x, y, width, height } of boxes) {
       const x1 = Math.floor((x - borderWidth) / EPSILON) * EPSILON;

@@ -3169,6 +3169,9 @@ class AnnotationLayer {
    * @memberof AnnotationLayer
    */
   async render(params) {
+
+
+    console.log("Render a note : ", params);
     const { annotations } = params;
     const layer = this.div;
     setLayerDimensions(layer, this.viewport);
@@ -3209,6 +3212,7 @@ class AnnotationLayer {
       }
       elementParams.data = data;
       const element = AnnotationElementFactory.create(elementParams);
+      console.log("element generated", element);
 
       if (!element.isRenderable) {
         continue;
@@ -3230,8 +3234,12 @@ class AnnotationLayer {
       await this.#appendElement(rendered, data.id);
 
       if (element._isEditable) {
+
+        console.log("element is editable");
         this.#editableAnnotations.set(element.data.id, element);
         this._annotationEditorUIManager?.renderAnnotationElement(element);
+
+        console.log("pushed and renderered", this.#editableAnnotations, this._annotationEditorUIManager);
       }
     }
 

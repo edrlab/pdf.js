@@ -1461,10 +1461,68 @@ class PDFPageProxy {
    * @returns {Promise<Array<any>>} A promise that is resolved with an
    *   {Array} of the annotation objects.
    */
-  getAnnotations({ intent = "display" } = {}) {
+  async getAnnotations({ intent = "display" } = {}) {
     const { renderingIntent } = this._transport.getRenderingIntent(intent);
 
-    return this._transport.getAnnotations(this._pageIndex, renderingIntent);
+    /**
+ * Helper function to parse query string (e.g. ?param1=value&param2=...).
+ * @param {string} query
+ * @returns {Map}
+ */
+    function parseQueryString(query) {
+      const params = new Map();
+      for (const [key, value] of new URLSearchParams(query)) {
+        params.set(key.toLowerCase(), value);
+      }
+      return params;
+    }
+
+    // THORIUM_BUILD
+    const queryString = document.location.search.substring(1);
+    const params = parseQueryString(queryString);
+    const noteUrl = params.get("noteurl") || "";
+    console.log("START NOTE REQUEST with ", noteUrl);
+    let notes = [];
+    // if (noteUrl) {
+    //   const notesRaw = await (await fetch(noteUrl)).json() || [];
+    //   const notesFiltered = notesRaw.filter((note) => note?.group === "annotation");
+    //   // console.log("!========!");
+    //   // console.log(notesFiltered);
+    //   // console.log("!========!");
+    //   notes = notesFiltered.map((note) => {
+
+    //     const color = [note.color.red, note.color.green, note.color.blue];
+    //     const { quadPoints, outlines, rect, structTreeParentId } = note.locatorExtended.pdfInfo;
+    //     const text = note.locatorExtended.locator.text.highlight;
+    //     const pageIndex = parseInt(note.locatorExtended.locator.href, 10);
+
+    //     return {
+    //       annotationType: 9,
+    //       color,
+    //       opacity: 1,
+    //       thickness: 12,
+    //       quadPoints,
+    //       outlines,
+    //       pageIndex,
+    //       rect,
+    //       rotation: 0,
+    //       structTreeParentId,
+    //       text,
+    //       isEditable: true,
+    //       id: "myId",
+    //     };
+    //   });
+    //   console.log("!========!");
+    //   console.log(notes);
+    //   console.log("!========!");
+    // }
+
+    const annotationsFromPdf = await this._transport.getAnnotations(this._pageIndex, renderingIntent);
+
+    const annotations = [...(notes.filter(({ pageIndex }) => pageIndex === this._pageIndex)), ...annotationsFromPdf];
+
+    console.log("GET ANNOTATIONS FROM PDF AND THORIUM", annotations, "for page ", this._pageIndex);
+    return annotations;
   }
 
   /**
@@ -2945,6 +3003,8 @@ class WorkerTransport {
       );
     }
     const { map, transfer } = this.annotationStorage.serializable;
+
+    console.log("PDF API Save Document", map, transfer);
 
     return this.messageHandler
       .sendWithPromise(

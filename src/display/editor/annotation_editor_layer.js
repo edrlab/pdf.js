@@ -384,6 +384,8 @@ class AnnotationEditorLayer {
   #textLayerPointerDown(event) {
     // Unselect all the editors in order to let the user select some text
     // without being annoyed by an editor toolbar.
+
+    console.log("textLayerPointerDown", event);
     this.#uiManager.unselectAll();
     const { target } = event;
     if (
@@ -404,6 +406,8 @@ class AnnotationEditorLayer {
       );
       this.#textLayer.div.classList.add("free");
       this.toggleDrawing();
+
+      console.log("startDrawing");
       HighlightEditor.startHighlighting(
         this,
         this.#uiManager.direction === "ltr",
@@ -466,6 +470,8 @@ class AnnotationEditorLayer {
    * @param {AnnotationEditor} editor
    */
   remove(editor) {
+
+    console.log("remove !");
     this.detach(editor);
     this.#uiManager.removeEditor(editor);
     editor.div.remove();
@@ -662,6 +668,8 @@ class AnnotationEditorLayer {
    * @returns {AnnotationEditor}
    */
   createAndAddNewEditor(event, isCentered, data = {}) {
+
+    console.log("create the note, \"createAndAddNewEditor\"", event, isCentered, data);
     const id = this.getNextId();
     const editor = this.#createNewEditor({
       parent: this,
@@ -672,6 +680,8 @@ class AnnotationEditorLayer {
       isCentered,
       ...data,
     });
+
+    console.log("note created with note:", editor);
     if (editor) {
       this.add(editor);
     }

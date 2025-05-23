@@ -126,6 +126,8 @@ class HighlightEditor extends AnnotationEditor {
       this.#addToDrawLayer();
       this.rotate(this.rotation);
     }
+
+    console.log("HighlightEditor", this);
   }
 
   /** @inheritdoc */
@@ -861,6 +863,9 @@ class HighlightEditor extends AnnotationEditor {
 
   /** @inheritdoc */
   static async deserialize(data, parent, uiManager) {
+
+
+    console.log("HighlightEditor deserialize", data);
     let initialData = null;
     if (data instanceof HighlightAnnotationElement) {
       const {
@@ -914,6 +919,8 @@ class HighlightEditor extends AnnotationEditor {
 
     const { color, quadPoints, inkLists, opacity } = data;
     const editor = await super.deserialize(data, parent, uiManager);
+
+    console.log("HighlightEditor deserialize editor", editor);
 
     editor.color = Util.makeHexColor(...color);
     editor.#opacity = opacity || 1;
@@ -1015,6 +1022,7 @@ class HighlightEditor extends AnnotationEditor {
       rect,
       rotation: this.#getRotation(),
       structTreeParentId: this._structTreeParentId,
+      text: this.#text,
     };
 
     if (this.annotationElementId && !this.#hasElementChanged(serialized)) {

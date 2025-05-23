@@ -718,10 +718,13 @@ const PDFViewerApplication = {
 
     const { appConfig, eventBus } = this;
     let file;
+    // THORIUM_BUILD
+    let noteUrl;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       const queryString = document.location.search.substring(1);
       const params = parseQueryString(queryString);
       file = params.get("file") ?? AppOptions.get("defaultUrl");
+      noteUrl = params.get("noteurl") || "";
       validateFileURL(file);
     } else if (PDFJSDev.test("MOZCENTRAL")) {
       file = window.location.href;
@@ -795,7 +798,7 @@ const PDFViewerApplication = {
 
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       if (file) {
-        this.open({ url: file });
+        this.open({ url: file, noteUrl });
       } else {
         this._hideViewBookmark();
       }
@@ -1115,6 +1118,45 @@ const PDFViewerApplication = {
 
     // Set the necessary API parameters, using all the available options.
     const apiParams = AppOptions.getAll(OptionKind.API);
+
+    // THORIUM_BUILD
+    // const noteUrl = args.noteUrl;
+    // delete args.noteUrl;
+    // console.log("START NOTE REQUEST with ", noteUrl);
+    // let notesRaw = [];
+    // let notes = [];
+    // if (noteUrl) {
+    //   notesRaw = await (await fetch(noteUrl)).json() || [];
+    //   const notesFiltered = notesRaw.filter((note) => note?.group === "annotation");
+    //   console.log("!========!");
+    //   console.log(notesFiltered);
+    //   console.log("!========!");
+    //   notes = notesFiltered.map((note) => {
+
+    //     const color = [note.color.red, note.color.green, note.color.blue];
+    //     const {quadPoints, outlines, rect, structTreeParentId} = note.locatorExtended.pdfInfo;
+    //     const text = note.locatorExtended.locator.text.highlight;
+    //     const pageIndex = parseInt(note.locatorExtended.locator.href, 10);
+
+    //     return {
+    //       annotationType: AnnotationEditorType.HIGHLIGHT,
+    //       color,
+    //       opacity: 1,
+    //       thickness: 12,
+    //       quadPoints,
+    //       outlines,
+    //       pageIndex,
+    //       rect,
+    //       rotation: 0,
+    //       structTreeParentId,
+    //       text,
+    //     };
+    //   });
+    //   console.log("!========!");
+    //   console.log(notes);
+    //   console.log("!========!");
+    // }
+
     const loadingTask = getDocument({
       ...apiParams,
       ...args,
@@ -1298,6 +1340,10 @@ const PDFViewerApplication = {
   load(pdfDocument) {
     this.pdfDocument = pdfDocument;
 
+    // TODO: here we can deserialize annotation from thorium
+    // call Highlight.deserialize static method
+    // and then populate pdfDocument.annotationStorage
+
     pdfDocument.getDownloadInfo().then(({ length }) => {
       this._contentLength = length; // Ensure that the correct length is used.
       this.loadingBar?.hide();
@@ -1338,6 +1384,24 @@ const PDFViewerApplication = {
     const pdfViewer = this.pdfViewer;
     pdfViewer.setDocument(pdfDocument);
     const { firstPagePromise, onePageRendered, pagesPromise } = pdfViewer;
+
+    // // THORIUM_BUILD
+    // if (pdfDocument.annotationStorage) {
+    //   console.log("TODO convert thorium note to annotationStorage");
+    //   console.log("PDFviewer is ready ", !!this.pdfViewer);
+
+    //   console.log("Try to deserialize the first note");
+    //   const note = notes[0];
+    //   const { pageIndex } = note;
+    //   //
+    //   // I have to find a way to subscribe to each pageView init and push annotation to it (deserialize)
+    //   this.eventBus._on("pagesinit", () => {
+    //     const pageView = this.pdfViewer.getPageView(pageIndex);
+    //     console.log("pageView of pageIndex", pageIndex, pageView);
+    //     const annotationLayer = pageView.annotationLayer?.annotationLayer;
+    //     console.log("pageView annotationLayer", annotationLayer);
+    //   });
+    // }
 
     this.pdfThumbnailViewer?.setDocument(pdfDocument);
 
@@ -2030,10 +2094,11 @@ const PDFViewerApplication = {
       opts
     );
     eventBus._on("print", this.triggerPrinting.bind(this), opts);
-    // eventBus._on("download", this.downloadOrSave.bind(this), opts);
+    eventBus._on("download", this.downloadOrSave.bind(this), opts);
     eventBus._on("firstpage", () => (this.page = 1), opts);
     eventBus._on("lastpage", () => (this.page = this.pagesCount), opts);
-    eventBus._on("__setPageNumber", (page) => (this.page = page), opts);
+    eventBus._on("__setPageIndexOneBased", (page) => (this.page = page), opts);
+    eventBus._on("__setPageNumberString", (page) => (this.pdfLinkService.goToPage(page)), opts);
     eventBus._on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus._on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus._on("zoomin", this.zoomIn.bind(this), opts);

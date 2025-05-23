@@ -123,6 +123,9 @@ class AnnotationLayerBuilder {
    *   annotations is complete.
    */
   async render({ viewport, intent = "display", structTreeLayer = null }) {
+
+
+    console.log("annotation_Layer_Builder RENDER", this);
     if (this.div) {
       if (this._cancelled || !this.annotationLayer) {
         return;
@@ -143,6 +146,8 @@ class AnnotationLayerBuilder {
     if (this._cancelled) {
       return;
     }
+
+    console.log("annotation_Layer_Builder_RENDER-getAnno", annotations, this);
 
     // Create an annotation layer div and render the annotations
     // if there is at least one annotation.

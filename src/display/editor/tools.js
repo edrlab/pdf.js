@@ -1108,7 +1108,9 @@ class AnnotationEditorUIManager {
 
   highlightSelection(methodOfCreation = "") {
     const selection = document.getSelection();
+    console.log("THORIUM_BUILD hughlightSelection requested", selection);
     if (!selection || selection.isCollapsed) {
+      console.log("THORIUM_BUILD No HighlightSelection (maybe collapsed)");
       return;
     }
     const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
@@ -1121,10 +1123,25 @@ class AnnotationEditorUIManager {
     }
     selection.empty();
 
+    console.log("TextLayer", textLayer);
+    console.log("Boxes", boxes);
     const layer = this.#getLayerForTextLayer(textLayer);
+
+    console.log("layer", layer);
     const isNoneMode = this.#mode === AnnotationEditorType.NONE;
+
+    // THORIUM_BUILD
+    // if (!isNoneMode) {
+    //   console.log("THORIUM_BUILD Not on the Node Mode !!");
+    //   return;
+    // }
+    
     const callback = () => {
-      layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+
+      // THORIUM_BUILD: quick fix: eventBus 'once' doesn't work if there are dispatching the same event from callback, so let's unsubscribe to this event before
+      this._eventBus.off("annotationeditormodechanged", callback);
+      console.log("callback");
+      const editor = layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
         methodOfCreation,
         boxes,
         anchorNode,
@@ -1136,6 +1153,8 @@ class AnnotationEditorUIManager {
       if (isNoneMode) {
         this.showAllEditors("highlight", true, /* updateButton = */ true);
       }
+      // THORIUM_BUILD
+      setTimeout(() => this.updateToolbar(AnnotationEditorType.NONE), 0);
     };
     if (isNoneMode) {
       this.switchToMode(AnnotationEditorType.HIGHLIGHT, callback);
@@ -1169,12 +1188,21 @@ class AnnotationEditorUIManager {
       this.#annotationStorage &&
       !this.#annotationStorage.has(editor.id)
     ) {
+
+      console.log("THORIUM_BUILD, dispatch annotation serialized", editor);
+      this._eventBus.dispatch("__annotation", editor.serialize());
       this.#annotationStorage.setValue(editor.id, editor);
     }
   }
 
   #selectionChange() {
     const selection = document.getSelection();
+
+    // TODO send locator from DOM-RANGE with https://github.com/edrlab/r2-navigator-js/blob/9724ef3d4523e956e5e616d91f9f10872b4c02a7/src/electron/renderer/webview/selection.ts#L154
+
+    console.log("SelectionChange");
+    console.log("selection", selection);
+
     if (!selection || selection.isCollapsed) {
       if (this.#selectedTextNode) {
         this.#highlightToolbar?.hide();
@@ -1185,6 +1213,12 @@ class AnnotationEditorUIManager {
       }
       return;
     }
+
+    // THORIUM_BUILD
+    this._eventBus.dispatch("__selectionChange", selection.toString());
+
+    const range = selection.getRangeAt(0);
+    // console.log("selectionRange", range);
     const { anchorNode } = selection;
     if (anchorNode === this.#selectedTextNode) {
       return;
@@ -1202,6 +1236,10 @@ class AnnotationEditorUIManager {
       }
       return;
     }
+
+    // console.log("anchorNode", anchorNode);
+    // console.log("anchorEleemnt", anchorElement);
+    // console.log("textLayer", textLayer);
 
     this.#highlightToolbar?.hide();
     this.#selectedTextNode = anchorNode;
@@ -2016,6 +2054,12 @@ class AnnotationEditorUIManager {
    * @param {AnnotationEditor} editor
    */
   setSelected(editor) {
+
+    // THORIUM_BUILD
+    console.log("SELECTED !!");
+
+    this.unselect(editor);
+    return;
     this.#currentDrawingSession?.commitOrRemove();
     for (const ed of this.#selectedEditors) {
       if (ed !== editor) {
