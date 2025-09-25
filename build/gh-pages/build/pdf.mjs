@@ -11405,7 +11405,7 @@ function getDocument(src = {}) {
   }
   const docParams = {
     docId,
-    apiVersion: "5.2.146",
+    apiVersion: "5.2.147",
     data,
     password,
     disableAutoFetch,
@@ -13167,8 +13167,8 @@ class InternalRenderTask {
     }
   }
 }
-const version = "5.2.146";
-const build = "ea36ba12e";
+const version = "5.2.147";
+const build = "b53d126c8";
 
 ;// ./src/shared/scripting_utils.js
 function makeColorComp(n) {
@@ -22548,8 +22548,8 @@ class DrawLayer {
 
 
 
-const pdfjsVersion = "5.2.146";
-const pdfjsBuild = "ea36ba12e";
+const pdfjsVersion = "5.2.147";
+const pdfjsBuild = "b53d126c8";
 {
   globalThis.pdfjsTestingUtils = {
     HighlightOutliner: HighlightOutliner
