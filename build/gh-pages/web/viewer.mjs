@@ -725,7 +725,7 @@ const defaultOptions = {
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE
   },
   enableScripting: {
-    value: true,
+    value: false,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE
   },
   enableSignatureEditor: {
@@ -1447,7 +1447,7 @@ class BasePreferences {
     enableNewAltTextWhenAddingImage: true,
     enablePermissions: false,
     enablePrintAutoRotate: true,
-    enableScripting: true,
+    enableScripting: false,
     enableSignatureEditor: false,
     enableUpdatedAddImage: false,
     externalLinkTarget: 0,
@@ -11601,7 +11601,7 @@ class PDFViewer {
   #supportsPinchToZoom = true;
   #textLayerMode = TextLayerMode.ENABLE;
   constructor(options) {
-    const viewerVersion = "5.2.147";
+    const viewerVersion = "5.2.151";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -16797,8 +16797,8 @@ function beforeUnload(evt) {
 
 
 
-const pdfjsVersion = "5.2.147";
-const pdfjsBuild = "b53d126c8";
+const pdfjsVersion = "5.2.151";
+const pdfjsBuild = "3c1f506df";
 const AppConstants = {
   LinkTarget: LinkTarget,
   RenderingStates: RenderingStates,

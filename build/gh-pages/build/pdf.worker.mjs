@@ -57191,7 +57191,7 @@ class WorkerMessageHandler {
       docId,
       apiVersion
     } = docParams;
-    const workerVersion = "5.2.147";
+    const workerVersion = "5.2.151";
     if (apiVersion !== workerVersion) {
       throw new Error(`The API version "${apiVersion}" does not match ` + `the Worker version "${workerVersion}".`);
     }
@@ -57723,8 +57723,8 @@ class WorkerMessageHandler {
 
 ;// ./src/pdf.worker.js
 
-const pdfjsVersion = "5.2.147";
-const pdfjsBuild = "b53d126c8";
+const pdfjsVersion = "5.2.151";
+const pdfjsBuild = "3c1f506df";
 globalThis.pdfjsWorker = {
   WorkerMessageHandler: WorkerMessageHandler
 };
