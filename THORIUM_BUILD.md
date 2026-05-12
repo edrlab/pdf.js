@@ -46,7 +46,7 @@ git prune
 
 # ---- NEW BUILD ---- #
 
-git checkout master2
+git checkout master3
 
 # do some change
 
@@ -62,7 +62,7 @@ rm -r ./*
 
 git commit -a -m "build..."
 
-git checkout master2
+git checkout master3
 
 npm i && npm run build
 

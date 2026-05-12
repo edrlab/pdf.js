@@ -19,7 +19,7 @@ rm -r ./*
 
 git commit -a -m "build..."
 
-git checkout master2
+git checkout master3
 
 npm i && npm run build
 
