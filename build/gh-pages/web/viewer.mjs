@@ -21,8 +21,8 @@
  */
 
 /**
- * pdfjsVersion = 5.7.303
- * pdfjsBuild = b3012a47a
+ * pdfjsVersion = 5.7.311
+ * pdfjsBuild = bae96777a
  */
 /******/ // The require scope
 /******/ var __webpack_require__ = {};
@@ -14318,7 +14318,7 @@ class PDFViewer {
   #savedPageViews = null;
   #deletedPageNumbers = null;
   constructor(options) {
-    const viewerVersion = "5.7.303";
+    const viewerVersion = "5.7.311";
     if (version !== viewerVersion) {
       throw new Error(`The API version "${version}" does not match the Viewer version "${viewerVersion}".`);
     }
@@ -19254,6 +19254,23 @@ const PDFViewerApplication = {
       } catch (reason) {
         console.error("Unable to get page for thumb view", reason);
       }
+      const dispatchThumbnailRendered = () => {
+        eventBus.dispatch("thumbnailrendered", {
+          source: thumbView,
+          pageNumber: thumbView.id,
+          pdfPage: thumbView.pdfPage
+        });
+      };
+      if (thumbView.renderingState === RenderingStates.FINISHED) {
+        for (let i = 0; i < 25 && !thumbView.image?.src; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        if (thumbView.image?.src) {
+          dispatchThumbnailRendered();
+          return;
+        }
+        thumbView.reset();
+      }
       await new Promise(resolve => {
         const eventHandler = ({
           source
@@ -19264,7 +19281,11 @@ const PDFViewerApplication = {
           }
         };
         eventBus._on("thumbnailrendered", eventHandler);
-        this.pdfRenderingQueue.renderView(thumbView);
+        if (!this.pdfRenderingQueue.renderView(thumbView)) {
+          eventBus._off("thumbnailrendered", eventHandler);
+          dispatchThumbnailRendered();
+          resolve();
+        }
       });
     };
     let handlerPromise = Promise.resolve();
