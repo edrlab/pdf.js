@@ -9,6 +9,8 @@ git checkout master3
 
 git commit -a && echo "OK" || echo "KO"
 
+git push && echo "OK" || echo "KO"
+
 COMMIT_HASH=$(git rev-parse HEAD)
 
 git checkout build
