@@ -21,7 +21,7 @@ git commit -a -m "build..."
 
 git checkout master3
 
-npm i && npm run build
+npm i --ignore-script && npm run build
 
 git checkout build
 
