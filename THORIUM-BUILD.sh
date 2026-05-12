@@ -7,7 +7,7 @@ git checkout master3
 
 # do some change
 
-git commit -a
+git commit -a && echo "OK" || echo "KO"
 
 COMMIT_HASH=$(git rev-parse HEAD)
 
