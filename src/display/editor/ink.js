@@ -22,6 +22,7 @@ import {
 import { DrawingEditor, DrawingOptions } from "./draw.js";
 import { InkDrawOutline, InkDrawOutliner } from "./drawers/inkdraw.js";
 import { AnnotationEditor } from "./editor.js";
+import { BasicColorPicker } from "./color_picker.js";
 import { InkAnnotationElement } from "../annotation_layer.js";
 
 class InkDrawingOptions extends DrawingOptions {
@@ -149,6 +150,10 @@ class InkEditor extends DrawingEditor {
           opacity,
           borderStyle: { rawWidth: thickness },
           popupRef,
+          richText,
+          contentsObj,
+          creationDate,
+          modificationDate,
         },
         parent: {
           page: { pageNumber },
@@ -164,17 +169,75 @@ class InkEditor extends DrawingEditor {
         pageIndex: pageNumber - 1,
         rect: rect.slice(0),
         rotation,
+        annotationElementId: id,
         id,
         deleted: false,
         popupRef,
+        richText,
+        comment: contentsObj?.str || null,
+        creationDate,
+        modificationDate,
       };
     }
 
     const editor = await super.deserialize(data, parent, uiManager);
-    editor.annotationElementId = data.id || null;
     editor._initialData = initialData;
+    if (data.comment) {
+      editor.setCommentData(data);
+    }
 
     return editor;
+  }
+
+  /** @inheritdoc */
+  get toolbarButtons() {
+    this._colorPicker ||= new BasicColorPicker(this);
+    return [["colorPicker", this._colorPicker]];
+  }
+
+  get colorType() {
+    return AnnotationEditorParamsType.INK_COLOR;
+  }
+
+  get colorAndOpacityType() {
+    return AnnotationEditorParamsType.INK_COLOR_AND_OPACITY;
+  }
+
+  get opacityType() {
+    return AnnotationEditorParamsType.INK_OPACITY;
+  }
+
+  /** @inheritdoc */
+  updateParams(type, value) {
+    if (type === AnnotationEditorParamsType.INK_COLOR_AND_OPACITY) {
+      this._updateColorAndOpacity(value.color, value.opacity);
+      return;
+    }
+    super.updateParams(type, value);
+  }
+
+  /** @inheritdoc */
+  static updateDefaultParams(type, value) {
+    if (type === AnnotationEditorParamsType.INK_COLOR_AND_OPACITY) {
+      super.updateDefaultParams(
+        AnnotationEditorParamsType.INK_COLOR,
+        value.color
+      );
+      super.updateDefaultParams(
+        AnnotationEditorParamsType.INK_OPACITY,
+        value.opacity
+      );
+      return;
+    }
+    super.updateDefaultParams(type, value);
+  }
+
+  get color() {
+    return this._drawingOptions.stroke;
+  }
+
+  get opacity() {
+    return this._drawingOptions["stroke-opacity"];
   }
 
   /** @inheritdoc */
@@ -223,7 +286,7 @@ class InkEditor extends DrawingEditor {
       return this.serializeDeleted();
     }
 
-    const { lines, points, rect } = this.serializeDraw(isForCopying);
+    const { lines, points } = this.serializeDraw(isForCopying);
     const {
       _drawingOptions: {
         stroke,
@@ -231,8 +294,7 @@ class InkEditor extends DrawingEditor {
         "stroke-width": thickness,
       },
     } = this;
-    const serialized = {
-      annotationType: AnnotationEditorType.INK,
+    const serialized = Object.assign(super.serialize(isForCopying), {
       color: AnnotationEditor._colorManager.convert(stroke),
       opacity,
       thickness,
@@ -240,11 +302,8 @@ class InkEditor extends DrawingEditor {
         lines,
         points,
       },
-      pageIndex: this.pageIndex,
-      rect,
-      rotation: this.rotation,
-      structTreeParentId: this._structTreeParentId,
-    };
+    });
+    this.addComment(serialized);
 
     if (isForCopying) {
       serialized.isCopy = true;
@@ -262,6 +321,7 @@ class InkEditor extends DrawingEditor {
   #hasElementChanged(serialized) {
     const { color, thickness, opacity, pageIndex } = this._initialData;
     return (
+      this.hasEditedComment ||
       this._hasBeenMoved ||
       this._hasBeenResized ||
       serialized.color.some((c, i) => c !== color[i]) ||
@@ -273,11 +333,16 @@ class InkEditor extends DrawingEditor {
 
   /** @inheritdoc */
   renderAnnotationElement(annotation) {
+    if (this.deleted) {
+      annotation.hide();
+      return null;
+    }
     const { points, rect } = this.serializeDraw(/* isForCopying = */ false);
     annotation.updateEdited({
       rect,
       thickness: this._drawingOptions["stroke-width"],
       points,
+      popup: this.comment,
     });
 
     return null;

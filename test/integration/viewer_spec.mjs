@@ -17,9 +17,13 @@ import {
   awaitPromise,
   closePages,
   createPromise,
+  getRect,
   getSpanRectFromText,
   loadAndWait,
   scrollIntoView,
+  showViewsManager,
+  waitAndClick,
+  waitForPageChanging,
   waitForPageRendered,
 } from "./test_utils.mjs";
 import { PNG } from "pngjs";
@@ -42,23 +46,40 @@ describe("PDF viewer", () => {
       await closePages(pages);
     });
 
-    async function getTextAt(page, pageNumber, coordX, coordY) {
-      await page.waitForFunction(
-        pageNum =>
-          !document.querySelector(
-            `.page[data-page-number="${pageNum}"] > .textLayer`
-          ).hidden,
-        {},
-        pageNumber
+    async function waitForTextAfterZoom(page, originX, originY, scale, text) {
+      const handlePromise = await createPromise(page, resolve => {
+        const callback = e => {
+          if (e.pageNumber === 2) {
+            window.PDFViewerApplication.eventBus.off(
+              "textlayerrendered",
+              callback
+            );
+            resolve();
+          }
+        };
+        window.PDFViewerApplication.eventBus.on("textlayerrendered", callback);
+      });
+
+      await page.evaluate(
+        (scaleFactor, origin) => {
+          window.PDFViewerApplication.pdfViewer.updateScale({
+            drawingDelay: 0,
+            scaleFactor,
+            origin,
+          });
+        },
+        scale,
+        [originX, originY]
       );
-      return page.evaluate(
-        (x, y) => document.elementFromPoint(x, y)?.textContent,
-        coordX,
-        coordY
+
+      await awaitPromise(handlePromise);
+
+      await page.waitForFunction(
+        `document.elementFromPoint(${originX}, ${originY})?.textContent === "${text}"`
       );
     }
 
-    it("supports specifiying a custom origin", async () => {
+    it("supports specifying a custom origin", async () => {
       await Promise.all(
         pages.map(async ([browserName, page]) => {
           // We use this text span of page 2 because:
@@ -72,33 +93,8 @@ describe("PDF viewer", () => {
           const originX = rect.x + rect.width / 2;
           const originY = rect.y + rect.height / 2;
 
-          await page.evaluate(
-            origin => {
-              window.PDFViewerApplication.pdfViewer.increaseScale({
-                scaleFactor: 2,
-                origin,
-              });
-            },
-            [originX, originY]
-          );
-          const textAfterZoomIn = await getTextAt(page, 2, originX, originY);
-          expect(textAfterZoomIn)
-            .withContext(`In ${browserName}, zoom in`)
-            .toBe(text);
-
-          await page.evaluate(
-            origin => {
-              window.PDFViewerApplication.pdfViewer.decreaseScale({
-                scaleFactor: 0.8,
-                origin,
-              });
-            },
-            [originX, originY]
-          );
-          const textAfterZoomOut = await getTextAt(page, 2, originX, originY);
-          expect(textAfterZoomOut)
-            .withContext(`In ${browserName}, zoom out`)
-            .toBe(text);
+          await waitForTextAfterZoom(page, originX, originY, 2, text);
+          await waitForTextAfterZoom(page, originX, originY, 0.8, text);
         })
       );
     });
@@ -370,12 +366,12 @@ describe("PDF viewer", () => {
               .toBeLessThan(originalCanvasSize * factor ** 2);
 
             expect(canvasSize)
-              .withContext(`In ${browserName}, <= MAX_CANVAS_PIXELS`)
-              .toBeLessThanOrEqual(MAX_CANVAS_PIXELS.get(browserName));
+              .withContext(`In ${browserName}, <= MAX_CANVAS_PIXELS / 4`)
+              .toBeLessThanOrEqual(MAX_CANVAS_PIXELS.get(browserName) / 4);
 
             expect(canvasSize)
-              .withContext(`In ${browserName}, > MAX_CANVAS_PIXELS * 0.99`)
-              .toBeGreaterThan(MAX_CANVAS_PIXELS.get(browserName) * 0.99);
+              .withContext(`In ${browserName}, > MAX_CANVAS_PIXELS / 4 * 0.95`)
+              .toBeGreaterThan((MAX_CANVAS_PIXELS.get(browserName) / 4) * 0.95);
           })
         );
       });
@@ -389,7 +385,9 @@ describe("PDF viewer", () => {
       pages = await loadAndWait(
         "issue18694.pdf",
         ".textLayer .endOfContent",
-        "page-width"
+        "page-width",
+        null,
+        { capCanvasAreaFactor: -1 }
       );
     });
 
@@ -400,29 +398,13 @@ describe("PDF viewer", () => {
     it("must check that canvas perfectly fits the page whatever the zoom level is", async () => {
       await Promise.all(
         pages.map(async ([browserName, page]) => {
-          if (browserName === "chrome") {
-            // Skip the test for Chrome as `scrollIntoView` below hangs since
-            // Puppeteer 24.5.0 and higher.
-            // See https://github.com/mozilla/pdf.js/issues/19811.
-            // TODO: Remove this check once the issue is fixed.
-            return;
-          }
-
           // The pdf has a single page with a red background.
           // We set the viewer background to red, because when screenshoting
           // some part of the viewer background can be visible.
           // But here we don't care about the viewer background: we only
           // care about the page background and the canvas default color.
-
           await page.evaluate(() => {
             document.body.style.background = "#ff0000";
-            const toolbar = document.querySelector(".toolbar");
-            toolbar.style.display = "none";
-          });
-          await page.waitForSelector(".toolbar", { visible: false });
-          await page.evaluate(() => {
-            const p = document.querySelector(`.page[data-page-number="1"]`);
-            p.style.border = "none";
           });
 
           for (let i = 0; ; i++) {
@@ -459,7 +441,12 @@ describe("PDF viewer", () => {
   describe("Detail view on zoom", () => {
     const BASE_MAX_CANVAS_PIXELS = 1e6;
 
-    function setupPages(zoom, devicePixelRatio, setups = {}) {
+    function setupPages(
+      zoom,
+      devicePixelRatio,
+      capCanvasAreaFactor,
+      setups = {}
+    ) {
       let pages;
 
       beforeEach(async () => {
@@ -476,7 +463,10 @@ describe("PDF viewer", () => {
             }`,
             ...setups,
           },
-          { maxCanvasPixels: BASE_MAX_CANVAS_PIXELS * devicePixelRatio ** 2 },
+          {
+            maxCanvasPixels: BASE_MAX_CANVAS_PIXELS * devicePixelRatio ** 2,
+            capCanvasAreaFactor,
+          },
           { height: 600, width: 800, devicePixelRatio }
         );
       });
@@ -503,6 +493,8 @@ describe("PDF viewer", () => {
         const bottomRight = ctx.getImageData(width - 3, height - 3, 1, 1).data;
         return {
           size: width * height,
+          width,
+          height,
           topLeft: globalThis.pdfjsLib.Util.makeHexColor(...topLeft),
           bottomRight: globalThis.pdfjsLib.Util.makeHexColor(...bottomRight),
         };
@@ -528,7 +520,7 @@ describe("PDF viewer", () => {
     for (const pixelRatio of [1, 2]) {
       describe(`with pixel ratio ${pixelRatio}`, () => {
         describe("setupPages()", () => {
-          const forEachPage = setupPages("100%", pixelRatio);
+          const forEachPage = setupPages("100%", pixelRatio, -1);
 
           it("sets the proper devicePixelRatio", async () => {
             await forEachPage(async (browserName, page) => {
@@ -543,8 +535,63 @@ describe("PDF viewer", () => {
           });
         });
 
+        describe("when zooming with a cap on the canvas dimensions", () => {
+          const forEachPage = setupPages("10%", pixelRatio, 0);
+
+          it("must render the detail view", async () => {
+            await forEachPage(async (browserName, page) => {
+              await page.waitForSelector(
+                ".page[data-page-number='1'] .textLayer"
+              );
+
+              const before = await page.evaluate(extractCanvases, 1);
+              expect(before.length)
+                .withContext(`In ${browserName}, before`)
+                .toBe(1);
+
+              const factor = 50;
+              const handle = await waitForDetailRendered(page);
+              await page.evaluate(scaleFactor => {
+                window.PDFViewerApplication.pdfViewer.updateScale({
+                  drawingDelay: 0,
+                  scaleFactor,
+                });
+              }, factor);
+              await awaitPromise(handle);
+
+              const after = await page.evaluate(extractCanvases, 1);
+              // The page dimensions are 595x841, so the base canvas is a scale
+              // version of that but the number of pixels is capped to
+              // 800x600 = 480000.
+              expect(after.length)
+                .withContext(`In ${browserName}, after`)
+                .toBe(2);
+              expect(after[0].width)
+                .withContext(`In ${browserName}`)
+                .toBe(Math.floor(291 * pixelRatio));
+              expect(after[0].height)
+                .withContext(`In ${browserName}`)
+                .toBe(Math.floor(411.5 * pixelRatio));
+
+              // The dimensions of the detail canvas are capped to 800x600 but
+              // it depends on the visible area which depends itself of the
+              // scrollbars dimensions, hence we just check that the canvas
+              // dimensions are capped.
+              expect(after[1].width)
+                .withContext(`In ${browserName}`)
+                .toBeLessThan(810 * pixelRatio);
+              expect(after[1].height)
+                .withContext(`In ${browserName}`)
+                .toBeLessThan(575 * pixelRatio);
+              expect(after[1].size)
+                .withContext(`In ${browserName}`)
+                .toBeLessThan(800 * 600 * pixelRatio ** 2);
+            });
+          });
+        });
+
         describe("when zooming in past max canvas size", () => {
-          const forEachPage = setupPages("100%", pixelRatio);
+          const forEachPage = setupPages("100%", pixelRatio, -1);
 
           it("must render the detail view", async () => {
             await forEachPage(async (browserName, page) => {
@@ -616,7 +663,7 @@ describe("PDF viewer", () => {
         });
 
         describe("when starting already zoomed in past max canvas size", () => {
-          const forEachPage = setupPages("300%", pixelRatio);
+          const forEachPage = setupPages("300%", pixelRatio, -1);
 
           it("must render the detail view", async () => {
             await forEachPage(async (browserName, page) => {
@@ -654,7 +701,7 @@ describe("PDF viewer", () => {
         });
 
         describe("when scrolling", () => {
-          const forEachPage = setupPages("300%", pixelRatio);
+          const forEachPage = setupPages("300%", pixelRatio, -1);
 
           it("must update the detail view", async () => {
             await forEachPage(async (browserName, page) => {
@@ -689,7 +736,7 @@ describe("PDF viewer", () => {
         });
 
         describe("when scrolling little enough that the existing detail covers the new viewport", () => {
-          const forEachPage = setupPages("300%", pixelRatio);
+          const forEachPage = setupPages("300%", pixelRatio, -1);
 
           it("must not re-create the detail canvas", async () => {
             await forEachPage(async (browserName, page) => {
@@ -732,7 +779,7 @@ describe("PDF viewer", () => {
         });
 
         describe("when scrolling to have two visible pages", () => {
-          const forEachPage = setupPages("300%", pixelRatio);
+          const forEachPage = setupPages("300%", pixelRatio, -1);
 
           it("must update the detail view", async () => {
             await forEachPage(async (browserName, page) => {
@@ -805,7 +852,7 @@ describe("PDF viewer", () => {
         });
 
         describe("pagerendered event", () => {
-          const forEachPage = setupPages("100%", pixelRatio, {
+          const forEachPage = setupPages("100%", pixelRatio, -1, {
             eventBusSetup: eventBus => {
               globalThis.__pageRenderedEvents = [];
 
@@ -966,7 +1013,7 @@ describe("PDF viewer", () => {
     }
 
     describe("when immediately cancelled and re-rendered", () => {
-      const forEachPage = setupPages("100%", 1, {
+      const forEachPage = setupPages("100%", 1, -1, {
         eventBusSetup: eventBus => {
           globalThis.__pageRenderedEvents = [];
           eventBus.on("pagerendered", ({ pageNumber, isDetailView }) => {
@@ -1031,7 +1078,7 @@ describe("PDF viewer", () => {
     });
 
     describe("when cancelled and re-rendered after 1 microtick", () => {
-      const forEachPage = setupPages("100%", 1, {
+      const forEachPage = setupPages("100%", 1, -1, {
         eventBusSetup: eventBus => {
           globalThis.__pageRenderedEvents = [];
           eventBus.on("pagerendered", ({ pageNumber, isDetailView }) => {
@@ -1159,6 +1206,691 @@ describe("PDF viewer", () => {
           }
         })
       );
+    });
+  });
+
+  describe("Filename with a hash sign", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("empty%23hash.pdf", ".textLayer .endOfContent");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must extract the filename correctly", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const filename = await page.evaluate(() => document.title);
+
+          expect(filename)
+            .withContext(`In ${browserName}`)
+            .toBe("empty#hash.pdf");
+        })
+      );
+    });
+  });
+
+  describe("File param with an URL", () => {
+    let pages;
+
+    beforeEach(async () => {
+      const baseURL = new URL(global.integrationBaseUrl);
+      const url = `${baseURL.origin}/build/generic/web/compressed.tracemonkey-pldi-09.pdf`;
+      pages = await loadAndWait(
+        encodeURIComponent(url),
+        ".textLayer .endOfContent"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must load and extract the filename correctly", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const filename = await page.evaluate(() => document.title);
+
+          expect(filename)
+            .withContext(`In ${browserName}`)
+            .toBe("compressed.tracemonkey-pldi-09.pdf");
+        })
+      );
+    });
+  });
+
+  describe("File param with encoded characters (issue 20420)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      const baseURL = new URL(global.integrationBaseUrl);
+      const url = `${baseURL.origin}/build/generic/web/compressed.tracemonkey-pldi-09.pdf?token=%2Ffoo`;
+      pages = await loadAndWait(
+        encodeURIComponent(url),
+        ".textLayer .endOfContent"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must not double-decode the file param", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const pdfUrl = await page.evaluate(
+            () => window.PDFViewerApplication.url
+          );
+
+          expect(pdfUrl)
+            .withContext(`In ${browserName}`)
+            .toContain("token=%2Ffoo");
+          expect(pdfUrl)
+            .withContext(`In ${browserName}`)
+            .not.toContain("token=/foo");
+        })
+      );
+    });
+  });
+
+  describe("Keyboard scrolling on startup (bug 843653)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("tracemonkey.pdf", ".textLayer .endOfContent");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that keyboard scrolling works without having to give the focus to the viewer", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const pdfViewer = await page.evaluateHandle(
+            () => window.PDFViewerApplication.pdfViewer
+          );
+
+          // The viewer should not have the focus.
+          const hasFocus = await pdfViewer.evaluate(viewer =>
+            viewer.container.contains(document.activeElement)
+          );
+          expect(hasFocus).withContext(`In ${browserName}`).toBeFalse();
+
+          let currentPageNumber = await pdfViewer.evaluate(
+            viewer => viewer.currentPageNumber
+          );
+          expect(currentPageNumber).withContext(`In ${browserName}`).toBe(1);
+
+          // Press the 'PageDown' key to check that it works.
+          const handle = await waitForPageChanging(page);
+          await page.keyboard.press("PageDown");
+          await awaitPromise(handle);
+
+          // The second page should be displayed.
+          currentPageNumber = await pdfViewer.evaluate(
+            viewer => viewer.currentPageNumber
+          );
+          expect(currentPageNumber).withContext(`In ${browserName}`).toBe(2);
+        })
+      );
+    });
+  });
+
+  describe("Printing can be disallowed for some pdfs (bug 1978985)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "print_protection.pdf",
+        "#passwordDialog",
+        null,
+        null,
+        { enablePermissions: true }
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that printing is disallowed", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForSelector("#printButton", {
+            visible: true,
+          });
+
+          const selector = "#passwordDialog input#password";
+          await page.waitForSelector(selector, { visible: true });
+          await page.type(selector, "1234");
+          await page.click("#passwordDialog button#passwordSubmit");
+
+          await page.waitForSelector(".textLayer .endOfContent");
+
+          // The print button should be hidden.
+          await page.waitForSelector("#printButton", {
+            hidden: true,
+          });
+          await page.waitForSelector("#secondaryPrint", {
+            hidden: true,
+          });
+
+          const hasThrown = await page.evaluate(() => {
+            try {
+              window.print();
+            } catch {
+              return true;
+            }
+            return false;
+          });
+          expect(hasThrown).withContext(`In ${browserName}`).toBeTrue();
+        })
+      );
+    });
+  });
+
+  describe("Pinch-zoom", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "tracemonkey.pdf",
+        `.page[data-page-number = "1"] .endOfContent`
+      );
+    });
+
+    it("keeps the content under the pinch centre fixed on the screen", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          if (browserName === "firefox") {
+            pending(
+              "Touch events are not supported on devices without touch screen in Firefox."
+            );
+          }
+          if (browserName === "chrome") {
+            pending(
+              "Pinch zoom emulation is not supported for WebDriver BiDi in Chrome."
+            );
+          }
+
+          const rect = await getSpanRectFromText(page, 1, "type-stable");
+          const originX = rect.x + rect.width / 2;
+          const originY = rect.y + rect.height / 2;
+          const rendered = await createPromise(page, resolve => {
+            const cb = e => {
+              if (e.pageNumber === 1) {
+                window.PDFViewerApplication.eventBus.off(
+                  "textlayerrendered",
+                  cb
+                );
+                resolve();
+              }
+            };
+            window.PDFViewerApplication.eventBus.on("textlayerrendered", cb);
+          });
+          const client = await page.target().createCDPSession();
+          await client.send("Input.synthesizePinchGesture", {
+            x: originX,
+            y: originY,
+            scaleFactor: 3,
+            gestureSourceType: "touch",
+          });
+          await awaitPromise(rendered);
+          const spanHandle = await page.evaluateHandle(() =>
+            Array.from(
+              document.querySelectorAll(
+                '.page[data-page-number="1"] .textLayer span'
+              )
+            ).find(span => span.textContent.includes("type-stable"))
+          );
+          expect(await spanHandle.isIntersectingViewport()).toBeTrue();
+        })
+      );
+    });
+  });
+
+  describe("Outline tree shift-click toggle (PR 20740)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "nested_outline.pdf",
+        "#viewsManagerToggleButton"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("should only toggle the clicked item's subtree, not the whole outline", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          // Open the sidebar.
+          await showViewsManager(page);
+
+          // Switch to outline view.
+          await page.click("#viewsManagerSelectorButton");
+          await page.waitForSelector("#outlinesViewMenu", { visible: true });
+          await page.click("#outlinesViewMenu");
+
+          // Wait for the outline tree to render with nesting (toggle buttons).
+          await page.waitForSelector("#outlinesView.withNesting");
+
+          // Initially all three top-level togglers must be expanded.
+          const initialHiddenCount = await page.$$eval(
+            "#outlinesView > .treeItem > .treeItemToggler",
+            togglers =>
+              togglers.filter(t => t.classList.contains("treeItemsHidden"))
+                .length
+          );
+          expect(initialHiddenCount).withContext(`In ${browserName}`).toBe(0);
+
+          // Shift-click the first top-level toggler (section "1. Introduction")
+          // to collapse only its subtree.
+          // The toggler has width/height 0 (visual content via ::before), so
+          // we dispatch the MouseEvent directly rather than using page.click().
+          await page.evaluate(() => {
+            const toggler = document.querySelector(
+              "#outlinesView > .treeItem:nth-child(1) > .treeItemToggler"
+            );
+            toggler.dispatchEvent(
+              new MouseEvent("click", {
+                shiftKey: true,
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+          });
+
+          // Section 1's toggler must now be collapsed.
+          const section1Collapsed = await page.$eval(
+            "#outlinesView > .treeItem:nth-child(1) > .treeItemToggler",
+            t => t.classList.contains("treeItemsHidden")
+          );
+          expect(section1Collapsed).withContext(`In ${browserName}`).toBeTrue();
+
+          // Sections 2 and 3 must remain expanded (the bug collapsed the whole
+          // outline by passing `this.container` instead of
+          // `target.parentNode`).
+          const otherHiddenCount = await page.$$eval(
+            "#outlinesView > .treeItem:nth-child(n+2) > .treeItemToggler",
+            togglers =>
+              togglers.filter(t => t.classList.contains("treeItemsHidden"))
+                .length
+          );
+          expect(otherHiddenCount).withContext(`In ${browserName}`).toBe(0);
+        })
+      );
+    });
+  });
+
+  describe("Find current outline item scrolls into view (PR 20742)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "freeculture.pdf",
+        ".textLayer .endOfContent",
+        null,
+        null,
+        null,
+        { width: 1280, height: 600 }
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must scroll the selected outline item into the visible sidebar area", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          // Open the sidebar.
+          await showViewsManager(page);
+
+          // Switch to outline view.
+          await page.click("#viewsManagerSelectorButton");
+          await waitAndClick(page, "#outlinesViewMenu");
+
+          // Wait for the outline tree to render.
+          await page.waitForSelector("#outlinesView .treeItem", {
+            visible: true,
+          });
+
+          // Navigate to page 310, which maps to a nested outline item inside
+          // a collapsed parent; _scrollToCurrentTreeItem will expand the parent
+          // and scroll the item into view.
+          await page.evaluate(() => {
+            window.PDFViewerApplication.page = 310;
+          });
+          await page.waitForFunction(
+            () => window.PDFViewerApplication.page === 310
+          );
+          await page.waitForSelector(
+            ".page[data-page-number='310'] .textLayer .endOfContent"
+          );
+
+          await waitAndClick(
+            page,
+            "#viewsManagerCurrentOutlineButton:not(:disabled)"
+          );
+
+          // Wait for an outline item to receive the "selected" class.
+          const item = await page.waitForSelector(
+            "#outlinesView .treeItemToggler:not(.treeItemsHidden) + a + .treeItems > .treeItem.selected",
+            {
+              visible: true,
+            }
+          );
+          const isVisible = await item.isIntersectingViewport();
+          expect(isVisible).withContext(`In ${browserName}`).toBeTrue();
+          const outlineItemText = await item.evaluate(el =>
+            el.textContent.trim()
+          );
+          expect(outlineItemText)
+            .withContext(`In ${browserName}`)
+            .toBe("Fire Lots of Lawyers");
+        })
+      );
+    });
+  });
+
+  describe("Scroll into view", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "tracemonkey_annotation_on_page_8.pdf",
+        `.page[data-page-number = "1"] .endOfContent`
+      );
+    });
+
+    it("Check that the top right corner of the annotation is centered vertically", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const handle = await page.evaluateHandle(() => [
+            new Promise(resolve => {
+              const container = document.getElementById("viewerContainer");
+              container.addEventListener("scrollend", resolve, {
+                once: true,
+              });
+              window.PDFViewerApplication.pdfLinkService.goToXY(
+                8,
+                43.55,
+                198.36,
+                {
+                  center: "vertical",
+                }
+              );
+            }),
+          ]);
+          await awaitPromise(handle);
+          const annotationSelector =
+            ".page[data-page-number='8'] .stampAnnotation";
+          await page.waitForSelector(annotationSelector, { visible: true });
+          const rect = await getRect(page, annotationSelector);
+          const containerRect = await getRect(page, "#viewerContainer");
+          expect(
+            Math.abs(
+              2 * (Math.ceil(rect.y) - containerRect.y) - containerRect.height
+            )
+          )
+            .withContext(`In ${browserName}`)
+            .toBeLessThanOrEqual(1);
+        })
+      );
+    });
+  });
+
+  describe("Outline with SE (Structure Element) entries", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "outlines_se.pdf",
+        `.page[data-page-number="1"] .endOfContent`
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("should navigate to the correct page when clicking an outline item with an SE entry", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          // Open the sidebar.
+          await showViewsManager(page);
+
+          // Switch to the outline view.
+          await page.click("#viewsManagerSelectorButton");
+          await page.waitForSelector("#outlinesViewMenu", { visible: true });
+          await page.click("#outlinesViewMenu");
+
+          for (let i = 2; i >= 1; i--) {
+            await waitAndClick(
+              page,
+              `#outlinesView .treeItem .treeItem:nth-child(${i}) a`
+            );
+            await page.waitForFunction(
+              pageNum => window.PDFViewerApplication.page === pageNum,
+              {},
+              i
+            );
+          }
+        })
+      );
+    });
+  });
+
+  describe("Double-click on title collapses/expands all outline items", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "nested_outline.pdf",
+        "#viewsManagerToggleButton"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("should collapse all outline items on first double-click and expand them on second", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await showViewsManager(page);
+
+          await page.click("#viewsManagerSelectorButton");
+          await page.waitForSelector("#outlinesViewMenu", { visible: true });
+          await page.click("#outlinesViewMenu");
+          await page.waitForSelector("#outlinesView.withNesting");
+
+          // Initially all togglers must be expanded (none hidden).
+          const initialHiddenCount = await page.$$eval(
+            "#outlinesView .treeItemToggler",
+            togglers =>
+              togglers.filter(t => t.classList.contains("treeItemsHidden"))
+                .length
+          );
+          expect(initialHiddenCount).withContext(`In ${browserName}`).toBe(0);
+
+          // Double-click the title label (not on a button) to collapse all.
+          await page.click("#viewsManagerHeaderLabel", { count: 2 });
+          await page.waitForFunction(
+            () =>
+              document.querySelectorAll(
+                "#outlinesView .treeItemToggler:not(.treeItemsHidden)"
+              ).length === 0
+          );
+
+          // Double-click again to expand all.
+          await page.click("#viewsManagerHeaderLabel", { count: 2 });
+          await page.waitForFunction(
+            () =>
+              document.querySelectorAll(
+                "#outlinesView .treeItemToggler.treeItemsHidden"
+              ).length === 0
+          );
+        })
+      );
+    });
+  });
+
+  describe("Double-click on title resets all layer checkboxes", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("issue17679.pdf", "#viewsManagerToggleButton");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("should restore all layer checkboxes to checked after unchecking them", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await showViewsManager(page);
+
+          await page.click("#viewsManagerSelectorButton");
+          await page.waitForSelector("#layersViewMenu", { visible: true });
+          await page.click("#layersViewMenu");
+          await page.waitForSelector("#layersView input[type='checkbox']");
+
+          // Uncheck all checkboxes.
+          const checkboxes = await page.$$(
+            "#layersView input[type='checkbox']"
+          );
+          for (const checkbox of checkboxes) {
+            await checkbox.click();
+          }
+          await page.waitForSelector("#layersView:not(:has(:checked))");
+
+          // Double-click the title label to reset layers to their default
+          // state.
+          await page.click("#viewsManagerHeaderLabel", { count: 2 });
+
+          await page.waitForSelector(
+            `#layersView:not(:has(input[type="checkbox"]:not(:checked)))`
+          );
+        })
+      );
+    });
+  });
+
+  describe("PDFPrintService", () => {
+    describe("blob URL revocation (issue #19988)", () => {
+      let pages;
+
+      beforeEach(async () => {
+        pages = await loadAndWait(
+          "basicapi.pdf",
+          ".textLayer .endOfContent",
+          null,
+          {
+            earlySetup: () => {
+              // Track blob URLs created during the print phase (between
+              // beforeprint and afterprint).
+              let trackPrintURLs = false;
+              window._printBlobURLs = [];
+
+              const origCreate = URL.createObjectURL.bind(URL);
+              URL.createObjectURL = blob => {
+                const url = origCreate(blob);
+                if (trackPrintURLs) {
+                  window._printBlobURLs.push(url);
+                }
+                return url;
+              };
+
+              // beforeprint fires before renderPages(); start tracking here.
+              window.addEventListener("beforeprint", () => {
+                trackPrintURLs = true;
+              });
+
+              // window.print() is called by performPrint() after renderPages()
+              // completes and all images are loaded into #printContainer.
+              window.print = () => {
+                const isFirefox = navigator.userAgent.includes("Firefox");
+                if (isFirefox) {
+                  // Firefox re-fetches blob URLs when rendering the print
+                  // preview (especially when a service worker is registered).
+                  // Verify the URLs are still accessible at this point.
+                  window._printImagesAccessible = Promise.all(
+                    window._printBlobURLs.map(url =>
+                      fetch(url).then(
+                        () => true,
+                        () => false
+                      )
+                    )
+                  );
+                } else {
+                  // Chrome uses the cached decoded data already in the <img>
+                  // elements and does not re-fetch blob URLs for printing.
+                  // Just verify the images rendered correctly.
+                  const imgs = document.querySelectorAll("#printContainer img");
+                  window._printImagesAccessible = Promise.resolve(
+                    Array.from(imgs).map(
+                      img => img.complete && img.naturalWidth > 0
+                    )
+                  );
+                }
+              };
+            },
+            appSetup: app => {
+              app._testPrintResolver = Promise.withResolvers();
+            },
+            eventBusSetup: eventBus => {
+              eventBus.on(
+                "afterprint",
+                () => {
+                  // Wait for the checks initiated in window.print() before
+                  // resolving, so the test can assert on them.
+                  (window._printImagesAccessible ?? Promise.resolve([])).then(
+                    window.PDFViewerApplication._testPrintResolver.resolve
+                  );
+                },
+                { once: true }
+              );
+            },
+          }
+        );
+      });
+
+      afterEach(async () => {
+        await closePages(pages);
+      });
+
+      it("must keep print image blob URLs accessible until destroy() is called", async () => {
+        await Promise.all(
+          pages.map(async ([browserName, page]) => {
+            await waitAndClick(page, "#printButton");
+
+            // Resolves with an array of booleans, one per print page image.
+            const accessible = await awaitPromise(
+              await page.evaluateHandle(() => [
+                window.PDFViewerApplication._testPrintResolver.promise,
+              ])
+            );
+
+            expect(accessible.length)
+              .withContext(`In ${browserName}: print pages were rendered`)
+              .toBeGreaterThan(0);
+            expect(accessible.every(v => v))
+              .withContext(
+                `In ${browserName}: all print images accessible at print time`
+              )
+              .toBeTrue();
+          })
+        );
+      });
     });
   });
 });

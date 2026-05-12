@@ -15,13 +15,8 @@
 
 import { BasePDFPageView } from "./base_pdf_page_view.js";
 import { OutputScale } from "pdfjs-lib";
-import { RenderingStates } from "./ui_utils.js";
+import { RenderingStates } from "./renderable_view.js";
 
-/** @typedef {import("./interfaces").IRenderableView} IRenderableView */
-
-/**
- * @implements {IRenderableView}
- */
 class PDFPageDetailView extends BasePDFPageView {
   #detailArea = null;
 
@@ -54,9 +49,9 @@ class PDFPageDetailView extends BasePDFPageView {
     return super.renderingState;
   }
 
-  set renderingState(value) {
+  set renderingState(state) {
     this.renderingCancelled = false;
-    super.renderingState = value;
+    super.renderingState = state;
   }
 
   reset({ keepCanvas = false } = {}) {
@@ -140,7 +135,7 @@ class PDFPageDetailView extends BasePDFPageView {
       return;
     }
 
-    const { viewport, maxCanvasPixels } = this.pageView;
+    const { viewport, maxCanvasPixels, capCanvasAreaFactor } = this.pageView;
 
     const visibleWidth = visibleArea.maxX - visibleArea.minX;
     const visibleHeight = visibleArea.maxY - visibleArea.minY;
@@ -156,7 +151,8 @@ class PDFPageDetailView extends BasePDFPageView {
     const visiblePixels =
       visibleWidth * visibleHeight * OutputScale.pixelRatio ** 2;
     const maxDetailToVisibleLinearRatio = Math.sqrt(
-      maxCanvasPixels / visiblePixels
+      OutputScale.capPixels(maxCanvasPixels, capCanvasAreaFactor) /
+        visiblePixels
     );
     const maxOverflowScale = (maxDetailToVisibleLinearRatio - 1) / 2;
     let overflowScale = Math.min(1, maxOverflowScale);
@@ -183,6 +179,49 @@ class PDFPageDetailView extends BasePDFPageView {
     this.#detailArea = { minX, minY, width, height, scale: viewport.scale };
 
     this.reset({ keepCanvas: true });
+  }
+
+  _getRenderingContext(canvas, transform) {
+    const baseContext = this.pageView._getRenderingContext(
+      canvas,
+      transform,
+      false
+    );
+    const recordedBBoxes = this.pdfPage.recordedBBoxes;
+
+    if (!recordedBBoxes || !this.enableOptimizedPartialRendering) {
+      return baseContext;
+    }
+
+    const {
+      viewport: { width: vWidth, height: vHeight },
+    } = this.pageView;
+    const {
+      width: aWidth,
+      height: aHeight,
+      minX: aMinX,
+      minY: aMinY,
+    } = this.#detailArea;
+
+    const detailMinX = aMinX / vWidth;
+    const detailMinY = aMinY / vHeight;
+    const detailMaxX = (aMinX + aWidth) / vWidth;
+    const detailMaxY = (aMinY + aHeight) / vHeight;
+
+    return {
+      ...baseContext,
+      operationsFilter(index) {
+        if (recordedBBoxes.isEmpty(index)) {
+          return false;
+        }
+        return (
+          recordedBBoxes.minX(index) <= detailMaxX &&
+          recordedBBoxes.maxX(index) >= detailMinX &&
+          recordedBBoxes.minY(index) <= detailMaxY &&
+          recordedBBoxes.maxY(index) >= detailMinY
+        );
+      },
+    };
   }
 
   async draw() {
@@ -213,7 +252,7 @@ class PDFPageDetailView extends BasePDFPageView {
 
     const canvasWrapper = this.pageView._ensureCanvasWrapper();
 
-    const { canvas, prevCanvas, ctx } = this._createCanvas(newCanvas => {
+    const { canvas, prevCanvas } = this._createCanvas(newCanvas => {
       // If there is already the background canvas, inject this new canvas
       // after it. We cannot simply use .append because all canvases must
       // be before the SVG elements used for drawings.
@@ -223,7 +262,10 @@ class PDFPageDetailView extends BasePDFPageView {
         canvasWrapper.prepend(newCanvas);
       }
     }, hideUntilComplete);
-    canvas.setAttribute("aria-hidden", "true");
+    canvas.ariaHidden = true;
+    if (this.enableOptimizedPartialRendering) {
+      canvas.className = "detailView";
+    }
 
     const { width, height } = viewport;
 
@@ -248,7 +290,7 @@ class PDFPageDetailView extends BasePDFPageView {
     style.left = `${(area.minX * 100) / width}%`;
 
     const renderingPromise = this._drawCanvas(
-      this.pageView._getRenderingContext(ctx, transform),
+      this._getRenderingContext(canvas, transform),
       () => {
         // If the rendering is cancelled, keep the old canvas visible.
         this.canvas?.remove();

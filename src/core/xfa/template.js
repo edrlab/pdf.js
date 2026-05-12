@@ -90,7 +90,6 @@ import {
   XFAObject,
   XFAObjectArray,
 } from "./xfa_object.js";
-import { fromBase64Util, Util, warn } from "../../shared/util.js";
 import {
   getBBox,
   getColor,
@@ -103,6 +102,7 @@ import {
   getStringOption,
   HTMLResult,
 } from "./utils.js";
+import { Util, warn } from "../../shared/util.js";
 import { getMetrics } from "./fonts.js";
 import { recoverJsURL } from "../core_utils.js";
 import { searchNode } from "./som.js";
@@ -1321,7 +1321,7 @@ class CheckButton extends XFAObject {
   [$toHTML](availableSpace) {
     // TODO: border, shape and mark.
 
-    const style = toStyle("margin");
+    const style = toStyle(this, "margin");
     const size = measureToString(this.size);
 
     style.width = style.height = size;
@@ -3412,8 +3412,7 @@ class Image extends StringObject {
       return HTMLResult.EMPTY;
     }
 
-    let buffer =
-      this[$globalData].images && this[$globalData].images.get(this.href);
+    let buffer = this[$globalData].images?.get(this.href);
     if (!buffer && (this.href || !this[$content])) {
       // In general, we don't get remote data and use what we have
       // in the pdf itself, so no picture for non null href.
@@ -3421,7 +3420,7 @@ class Image extends StringObject {
     }
 
     if (!buffer && this.transferEncoding === "base64") {
-      buffer = fromBase64Util(this[$content]);
+      buffer = Uint8Array.fromBase64(this[$content]);
     }
 
     if (!buffer) {
@@ -3900,7 +3899,7 @@ class Occur extends XFAObject {
       attributes.max !== ""
         ? getInteger({
             data: attributes.max,
-            defaultValue: 1,
+            defaultValue: -1,
             validate: x => true,
           })
         : "";
@@ -6133,7 +6132,7 @@ class Variables extends XFAObject {
 
 class TemplateNamespace {
   static [$buildXFAObject](name, attributes) {
-    if (TemplateNamespace.hasOwnProperty(name)) {
+    if (Object.hasOwn(TemplateNamespace, name)) {
       const node = TemplateNamespace[name](attributes);
       node[$setSetAttributes](attributes);
       return node;

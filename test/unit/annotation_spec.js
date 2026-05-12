@@ -35,8 +35,8 @@ import {
 import {
   CMAP_URL,
   createIdFactory,
-  DefaultCMapReaderFactory,
-  DefaultStandardFontDataFactory,
+  DefaultBinaryDataFactory,
+  fetchBuiltInCMapHelper,
   STANDARD_FONT_DATA_URL,
   XRefMock,
 } from "./test_utils.js";
@@ -57,7 +57,6 @@ describe("annotation", function () {
         },
       };
       this.evaluatorOptions = {
-        isEvalSupported: true,
         isOffscreenCanvasSupported: false,
       };
     }
@@ -82,9 +81,13 @@ describe("annotation", function () {
     }
   }
 
-  const fontDataReader = new DefaultStandardFontDataFactory({
-    baseUrl: STANDARD_FONT_DATA_URL,
+  const binaryDataFactory = new DefaultBinaryDataFactory({
+    cMapUrl: CMAP_URL,
+    standardFontDataUrl: STANDARD_FONT_DATA_URL,
   });
+
+  const fetchBuiltInCMap = name =>
+    fetchBuiltInCMapHelper(binaryDataFactory, /* cMapPacked = */ true, name);
 
   class HandlerMock {
     constructor() {
@@ -95,11 +98,11 @@ describe("annotation", function () {
       this.inputs.push({ name, data });
     }
 
-    sendWithPromise(name, data) {
-      if (name !== "FetchStandardFontData") {
-        return Promise.reject(new Error(`Unsupported mock ${name}.`));
+    async sendWithPromise(name, data) {
+      if (name === "FetchBinaryData") {
+        return binaryDataFactory.fetch(data);
       }
-      return fontDataReader.fetch(data);
+      throw new Error(`Unsupported mock ${name}.`);
     }
   }
 
@@ -113,19 +116,10 @@ describe("annotation", function () {
     annotationGlobalsMock =
       await AnnotationFactory.createGlobals(pdfManagerMock);
 
-    const CMapReaderFactory = new DefaultCMapReaderFactory({
-      baseUrl: CMAP_URL,
-    });
-
     const builtInCMapCache = new Map();
-    builtInCMapCache.set(
-      "UniJIS-UTF16-H",
-      await CMapReaderFactory.fetch({ name: "UniJIS-UTF16-H" })
-    );
-    builtInCMapCache.set(
-      "Adobe-Japan1-UCS2",
-      await CMapReaderFactory.fetch({ name: "Adobe-Japan1-UCS2" })
-    );
+    for (const name of ["UniJIS-UTF16-H", "Adobe-Japan1-UCS2"]) {
+      builtInCMapCache.set(name, await fetchBuiltInCMap(name));
+    }
 
     idFactoryMock = createIdFactory(/* pageIndex = */ 0);
     partialEvaluator = new PartialEvaluator({
@@ -1783,7 +1777,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList.argsArray[1]).toEqual(new Uint8ClampedArray([26, 51, 76]));
+      expect(opList.argsArray[1]).toEqual(["#1a334c"]);
     });
 
     it("should render auto-sized text for printing", async function () {
@@ -2257,7 +2251,7 @@ describe("annotation", function () {
       );
       expect(newData.data).toEqual(
         "2 0 obj\n<< /Subtype /Form /Resources " +
-          "<< /Font << /Helv 314 0 R>>>> /BBox [0 0 32 10] /Matrix [0 1 -1 0 32 0] /Length 74>> stream\n" +
+          "<< /Font << /Helv 314 0 R>>>> /BBox [0 0 10 32] /Matrix [0 1 -1 0 32 0] /Length 74>> stream\n" +
           "/Tx BMC q BT /Helv 5 Tf 1 0 0 1 0 0 Tm 2 2.94 Td (hello world) Tj " +
           "ET Q EMC\nendstream\nendobj\n"
       );
@@ -2664,7 +2658,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList1.argsArray[1]).toEqual(new Uint8ClampedArray([26, 51, 76]));
+      expect(opList1.argsArray[1]).toEqual(["#1a334c"]);
 
       annotationStorage.set(annotation.data.id, { value: false });
 
@@ -2687,7 +2681,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList2.argsArray[1]).toEqual(new Uint8ClampedArray([76, 51, 26]));
+      expect(opList2.argsArray[1]).toEqual(["#4c331a"]);
     });
 
     it("should render checkboxes for printing twice", async function () {
@@ -2748,9 +2742,7 @@ describe("annotation", function () {
           [1, 0, 0, 1, 0, 0],
           false,
         ]);
-        expect(opList.argsArray[1]).toEqual(
-          new Uint8ClampedArray([26, 51, 76])
-        );
+        expect(opList.argsArray[1]).toEqual(["#1a334c"]);
       }
     });
 
@@ -2809,7 +2801,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList.argsArray[1]).toEqual(new Uint8ClampedArray([26, 51, 76]));
+      expect(opList.argsArray[1]).toEqual(["#1a334c"]);
     });
 
     it("should save checkboxes", async function () {
@@ -2938,10 +2930,11 @@ describe("annotation", function () {
 
     it("should handle radio buttons with a field value that's not an ASCII string", async function () {
       const parentDict = new Dict();
-      parentDict.set("V", Name.get("\x91I=\x91\xf0\x93\xe0\x97e3"));
+      const name = "\x91I=\x91\xf0\x93\xe0\x97e3";
+      parentDict.set("V", Name.get(name));
 
       const normalAppearanceStateDict = new Dict();
-      normalAppearanceStateDict.set("\x91I=\x91\xf0\x93\xe0\x97e3", null);
+      normalAppearanceStateDict.set(name, null);
 
       const appearanceStatesDict = new Dict();
       appearanceStatesDict.set("N", normalAppearanceStateDict);
@@ -2964,8 +2957,8 @@ describe("annotation", function () {
       expect(data.annotationType).toEqual(AnnotationType.WIDGET);
       expect(data.checkBox).toEqual(false);
       expect(data.radioButton).toEqual(true);
-      expect(data.fieldValue).toEqual("‚I=‚ðﬁàŠe3");
-      expect(data.buttonValue).toEqual("‚I=‚ðﬁàŠe3");
+      expect(data.fieldValue).toEqual(name);
+      expect(data.buttonValue).toEqual(name);
     });
 
     it("should handle radio buttons without a field value", async function () {
@@ -3052,7 +3045,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList1.argsArray[1]).toEqual(new Uint8ClampedArray([26, 51, 76]));
+      expect(opList1.argsArray[1]).toEqual(["#1a334c"]);
 
       annotationStorage.set(annotation.data.id, { value: false });
 
@@ -3075,7 +3068,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList2.argsArray[1]).toEqual(new Uint8ClampedArray([76, 51, 26]));
+      expect(opList2.argsArray[1]).toEqual(["#4c331a"]);
     });
 
     it("should render radio buttons for printing using normal appearance", async function () {
@@ -3134,7 +3127,7 @@ describe("annotation", function () {
         [1, 0, 0, 1, 0, 0],
         false,
       ]);
-      expect(opList.argsArray[1]).toEqual(new Uint8ClampedArray([76, 51, 26]));
+      expect(opList.argsArray[1]).toEqual(["#4c331a"]);
     });
 
     it("should save radio buttons", async function () {
@@ -3808,7 +3801,7 @@ describe("annotation", function () {
         [
           "2 0 obj",
           "<< /Subtype /Form /Resources << /Font << /Helv 314 0 R>>>> " +
-            "/BBox [0 0 32 10] /Matrix [0 -1 1 0 0 10] /Length 170>> stream",
+            "/BBox [0 0 10 32] /Matrix [0 -1 1 0 0 10] /Length 170>> stream",
           "/Tx BMC q",
           "1 1 10 32 re W n",
           "0.600006 0.756866 0.854904 rg",
@@ -4205,6 +4198,7 @@ describe("annotation", function () {
       const changes = new RefSetCache();
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4322,6 +4316,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test FreeText update");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4437,6 +4432,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test Ink creation");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4534,6 +4530,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test Ink creation");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4677,7 +4674,7 @@ describe("annotation", function () {
       // LineJoin.
       expect(opList.argsArray[3]).toEqual([1]);
       // Color.
-      expect(opList.argsArray[4]).toEqual(new Uint8ClampedArray([0, 255, 0]));
+      expect(opList.argsArray[4]).toEqual(["#00ff00"]);
       // Path.
       expect(opList.argsArray[5][0]).toEqual(OPS.stroke);
       expect(opList.argsArray[5][1]).toEqual([
@@ -4766,6 +4763,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test Highlight creation");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4859,6 +4857,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test free Highlight creation");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {
@@ -4972,6 +4971,117 @@ describe("annotation", function () {
         OPS.constructPath,
         OPS.endAnnotation,
       ]);
+    });
+
+    it("should update an existing Highlight annotation", async function () {
+      const highlightDict = new Dict();
+      highlightDict.set("Type", Name.get("Annot"));
+      highlightDict.set("Subtype", Name.get("Highlight"));
+      highlightDict.set("Rotate", 0);
+      highlightDict.set("CreationDate", "D:20190423");
+
+      const highlightRef = Ref.get(143, 0);
+      const xref = (partialEvaluator.xref = new XRefMock([
+        { ref: highlightRef, data: highlightDict },
+      ]));
+      const changes = new RefSetCache();
+
+      const task = new WorkerTask("test Highlight update");
+      await AnnotationFactory.saveNewAnnotations(
+        partialEvaluator,
+        xref,
+        task,
+        [
+          {
+            annotationType: AnnotationEditorType.HIGHLIGHT,
+            rotation: 90,
+            popup: {
+              contents: "Hello PDF.js World !",
+              rect: [1, 2, 3, 4],
+            },
+            id: "143R",
+            ref: highlightRef,
+            oldAnnotation: highlightDict,
+          },
+        ],
+        null,
+        changes
+      );
+
+      const data = await writeChanges(changes, xref);
+
+      const popup = data[0];
+      expect(popup.data).toEqual(
+        "1 0 obj\n" +
+          "<< /Type /Annot /Subtype /Popup /Open false /Rect [1 2 3 4] /Parent 143 0 R>>\n" +
+          "endobj\n"
+      );
+
+      const base = data[1].data.replaceAll(/\(D:\d+\)/g, "(date)");
+      expect(base).toEqual(
+        "143 0 obj\n" +
+          "<< /Type /Annot /Subtype /Highlight /Rotate 90 /CreationDate (date) /M (date) " +
+          "/F 4 /Contents (Hello PDF.js World !) /Popup 1 0 R>>\n" +
+          "endobj\n"
+      );
+    });
+
+    it("should update an existing Highlight annotation in removing its popup", async function () {
+      const popupRef = Ref.get(111, 0);
+      const highlightDict = new Dict();
+      highlightDict.set("Type", Name.get("Annot"));
+      highlightDict.set("Subtype", Name.get("Highlight"));
+      highlightDict.set("Rotate", 0);
+      highlightDict.set("CreationDate", "D:20190423");
+      highlightDict.set("Contents", "Hello PDF.js World !");
+      highlightDict.set("Popup", popupRef);
+      const highlightRef = Ref.get(143, 0);
+
+      const highlightPopupDict = new Dict();
+      highlightPopupDict.set("Type", Name.get("Annot"));
+      highlightPopupDict.set("Subtype", Name.get("Popup"));
+      highlightPopupDict.set("Open", false);
+      highlightPopupDict.set("Rect", [1, 2, 3, 4]);
+      highlightPopupDict.set("Parent", highlightRef);
+
+      const xref = (partialEvaluator.xref = new XRefMock([
+        { ref: highlightRef, data: highlightDict },
+        { ref: popupRef, data: highlightPopupDict },
+      ]));
+      const changes = new RefSetCache();
+
+      const task = new WorkerTask("test Highlight update");
+      await AnnotationFactory.saveNewAnnotations(
+        partialEvaluator,
+        xref,
+        task,
+        [
+          {
+            annotationType: AnnotationEditorType.HIGHLIGHT,
+            rotation: 90,
+            popup: {
+              contents: "",
+              deleted: true,
+              rect: [1, 2, 3, 4],
+            },
+            id: "143R",
+            ref: highlightRef,
+            oldAnnotation: highlightDict,
+            popupRef,
+          },
+        ],
+        null,
+        changes
+      );
+
+      const data = await writeChanges(changes, xref);
+      const base = data[0].data.replaceAll(/\(D:\d+\)/g, "(date)");
+      expect(base).toEqual(
+        "143 0 obj\n" +
+          "<< /Type /Annot /Subtype /Highlight /Rotate 90 /CreationDate (date) /M (date) " +
+          "/F 4>>\n" +
+          "endobj\n"
+      );
     });
   });
 
@@ -5108,6 +5218,7 @@ describe("annotation", function () {
       const task = new WorkerTask("test Stamp creation");
       await AnnotationFactory.saveNewAnnotations(
         partialEvaluator,
+        xref,
         task,
         [
           {

@@ -43,18 +43,18 @@ import {
   unselectEditor,
   waitForAnnotationEditorLayer,
   waitForAnnotationModeChanged,
+  waitForBrowserTrip,
   waitForEntryInStorage,
   waitForPageRendered,
   waitForSelectedEditor,
   waitForSerialized,
   waitForTimeout,
 } from "./test_utils.mjs";
-import { fileURLToPath } from "url";
 import fs from "fs";
 import path from "path";
 import { PNG } from "pngjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 
 const clearAll = clearEditors.bind(null, "stamp");
 
@@ -84,14 +84,6 @@ const copyImage = async (page, imagePath, selector) => {
 
   await waitForImage(page, selector);
 };
-
-async function waitForTranslation(page) {
-  return page.evaluate(async () => {
-    await new Promise(resolve => {
-      window.requestAnimationFrame(resolve);
-    });
-  });
-}
 
 const switchToStamp = switchToEditor.bind(null, "Stamp");
 
@@ -125,6 +117,10 @@ describe("Stamp Editor", () => {
           );
           const editorSelector = getEditorSelector(0);
           await waitForImage(page, editorSelector);
+
+          await page.waitForFunction(
+            `document.getElementById("viewer-alert").textContent === "Image added"`
+          );
 
           const { width } = await getEditorDimensions(page, editorSelector);
 
@@ -180,8 +176,8 @@ describe("Stamp Editor", () => {
           await waitForImage(page, editorSelector);
           await waitForSerialized(page, 1);
 
-          await page.waitForSelector(`${editorSelector} button.delete`);
-          await page.click(`${editorSelector} button.delete`);
+          await page.waitForSelector(`${editorSelector} button.deleteButton`);
+          await page.click(`${editorSelector} button.deleteButton`);
           await waitForSerialized(page, 0);
 
           await kbUndo(page);
@@ -632,6 +628,7 @@ describe("Stamp Editor", () => {
     });
 
     it("must check that the alt-text button is here when pasting in the second tab", async () => {
+      // Run sequentially to avoid clipboard issues.
       for (let i = 0; i < pages1.length; i++) {
         const [, page1] = pages1[i];
         await page1.bringToFront();
@@ -673,8 +670,8 @@ describe("Stamp Editor", () => {
         await page.waitForSelector(editorSelector);
         await waitForSerialized(page, 1);
 
-        await page.waitForSelector(`${editorSelector} button.delete`);
-        await page.click(`${editorSelector} button.delete`);
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
         await waitForSerialized(page, 0);
 
         await kbUndo(page);
@@ -705,8 +702,8 @@ describe("Stamp Editor", () => {
         await page.waitForSelector(editorSelector);
         await waitForSerialized(page, 1);
 
-        await page.waitForSelector(`${editorSelector} button.delete`);
-        await page.click(`${editorSelector} button.delete`);
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
         await waitForSerialized(page, 0);
 
         const twoToFourteen = Array.from(new Array(13).keys(), n => n + 2);
@@ -750,8 +747,8 @@ describe("Stamp Editor", () => {
         await page.waitForSelector(editorSelector);
         await waitForSerialized(page, 1);
 
-        await page.waitForSelector(`${editorSelector} button.delete`);
-        await page.click(`${editorSelector} button.delete`);
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
         await waitForSerialized(page, 0);
 
         const twoToOne = Array.from(new Array(13).keys(), n => n + 2).concat(
@@ -1003,7 +1000,7 @@ describe("Stamp Editor", () => {
         const buttonSelector = `${editorSelector} button.altText.new`;
         await page.waitForSelector(buttonSelector, { visible: true });
 
-        await waitForTranslation(page);
+        await waitForBrowserTrip(page);
         // Check the text in the button.
         let text = await page.evaluate(
           sel => document.querySelector(sel).textContent,
@@ -1052,7 +1049,7 @@ describe("Stamp Editor", () => {
         await waitForSelectedEditor(page, editorSelector);
         await page.waitForSelector(buttonSelector, { visible: true });
 
-        await waitForTranslation(page);
+        await waitForBrowserTrip(page);
         // Check the text in the button.
         text = await page.evaluate(
           sel => document.querySelector(sel).textContent,
@@ -1094,7 +1091,7 @@ describe("Stamp Editor", () => {
         await page.click("#newAltTextSave");
         await page.waitForSelector("#newAltTextDialog", { visible: false });
 
-        await waitForTranslation(page);
+        await waitForBrowserTrip(page);
         // Check the text in the button.
         text = await page.evaluate(
           sel => document.querySelector(sel).firstChild.textContent,
@@ -1170,7 +1167,9 @@ describe("Stamp Editor", () => {
       // Run sequentially to avoid clipboard issues.
       for (const [, page] of pages) {
         await page.evaluate(() => {
-          window.PDFViewerApplication.mlManager.enableAltTextModelDownload = false;
+          const { mlManager } = window.PDFViewerApplication;
+          mlManager.enableGuessAltText =
+            mlManager.enableAltTextModelDownload = false;
         });
 
         await switchToStamp(page);
@@ -1193,7 +1192,9 @@ describe("Stamp Editor", () => {
       // Run sequentially to avoid clipboard issues.
       for (const [browserName, page] of pages) {
         await page.evaluate(() => {
-          window.PDFViewerApplication.mlManager.enableAltTextModelDownload = true;
+          const { mlManager } = window.PDFViewerApplication;
+          mlManager.enableGuessAltText =
+            mlManager.enableAltTextModelDownload = true;
         });
         await switchToStamp(page);
 
@@ -1364,7 +1365,7 @@ describe("Stamp Editor", () => {
     });
   });
 
-  describe("A stamp musn't be on top of the secondary toolbar", () => {
+  describe("A stamp mustn't be on top of the secondary toolbar", () => {
     let pages;
 
     beforeEach(async () => {
@@ -1528,8 +1529,8 @@ describe("Stamp Editor", () => {
           let serialized = await getSerialized(page);
           expect(serialized).withContext(`In ${browserName}`).toEqual([]);
 
-          await page.waitForSelector(`${editorSelector} button.delete`);
-          await page.click(`${editorSelector} button.delete`);
+          await page.waitForSelector(`${editorSelector} button.deleteButton`);
+          await page.click(`${editorSelector} button.deleteButton`);
 
           await waitForSerialized(page, 1);
           serialized = await getSerialized(page);
@@ -1593,86 +1594,80 @@ describe("Stamp Editor", () => {
     });
 
     it("must check that deleting an image can be undone using the undo button", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await switchToStamp(page);
+      // Run sequentially to avoid clipboard issues.
+      for (const [, page] of pages) {
+        await switchToStamp(page);
 
-          const editorSelector = getEditorSelector(0);
-          await copyImage(page, "../images/firefox_logo.png", editorSelector);
-          await page.waitForSelector(editorSelector);
-          await waitForSerialized(page, 1);
+        const editorSelector = getEditorSelector(0);
+        await copyImage(page, "../images/firefox_logo.png", editorSelector);
+        await page.waitForSelector(editorSelector);
+        await waitForSerialized(page, 1);
 
-          await page.waitForSelector(`${editorSelector} button.delete`);
-          await page.click(`${editorSelector} button.delete`);
-          await waitForSerialized(page, 0);
-          await page.waitForSelector("#editorUndoBar", { visible: true });
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
+        await waitForSerialized(page, 0);
+        await page.waitForSelector("#editorUndoBar", { visible: true });
 
-          await page.waitForSelector("#editorUndoBarUndoButton", {
-            visible: true,
-          });
-          await page.click("#editorUndoBarUndoButton");
-          await waitForSerialized(page, 1);
-          await page.waitForSelector(editorSelector);
-          await page.waitForSelector(`${editorSelector} canvas`);
-        })
-      );
+        await page.waitForSelector("#editorUndoBarUndoButton", {
+          visible: true,
+        });
+        await page.click("#editorUndoBarUndoButton");
+        await waitForSerialized(page, 1);
+        await page.waitForSelector(editorSelector);
+        await page.waitForSelector(`${editorSelector} canvas`);
+      }
     });
 
     it("must check that the undo deletion popup displays the correct message", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await switchToStamp(page);
+      // Run sequentially to avoid clipboard issues.
+      for (const [, page] of pages) {
+        await switchToStamp(page);
 
-          const editorSelector = getEditorSelector(0);
-          await copyImage(page, "../images/firefox_logo.png", editorSelector);
-          await page.waitForSelector(editorSelector);
-          await waitForSerialized(page, 1);
+        const editorSelector = getEditorSelector(0);
+        await copyImage(page, "../images/firefox_logo.png", editorSelector);
+        await page.waitForSelector(editorSelector);
+        await waitForSerialized(page, 1);
 
-          await page.waitForSelector(`${editorSelector} button.delete`);
-          await page.click(`${editorSelector} button.delete`);
-          await waitForSerialized(page, 0);
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
+        await waitForSerialized(page, 0);
 
-          await page.waitForFunction(() => {
-            const messageElement = document.querySelector(
-              "#editorUndoBarMessage"
-            );
-            return messageElement && messageElement.textContent.trim() !== "";
-          });
-          const message = await page.waitForSelector("#editorUndoBarMessage");
-          const messageText = await page.evaluate(
-            el => el.textContent,
-            message
+        await page.waitForFunction(() => {
+          const messageElement = document.querySelector(
+            "#editorUndoBarMessage"
           );
-          expect(messageText).toContain("Image removed");
-        })
-      );
+          return messageElement && messageElement.textContent.trim() !== "";
+        });
+        const message = await page.waitForSelector("#editorUndoBarMessage");
+        const messageText = await page.evaluate(el => el.textContent, message);
+        expect(messageText).toContain("Image removed");
+      }
     });
 
     it("must check that the popup disappears when a new image is inserted", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await switchToStamp(page);
+      // Run sequentially to avoid clipboard issues.
+      for (const [, page] of pages) {
+        await switchToStamp(page);
 
-          const editorSelector = getEditorSelector(0);
-          await copyImage(page, "../images/firefox_logo.png", editorSelector);
-          await page.waitForSelector(editorSelector);
-          await waitForSerialized(page, 1);
+        const editorSelector = getEditorSelector(0);
+        await copyImage(page, "../images/firefox_logo.png", editorSelector);
+        await page.waitForSelector(editorSelector);
+        await waitForSerialized(page, 1);
 
-          await page.waitForSelector(`${editorSelector} button.delete`);
-          await page.click(`${editorSelector} button.delete`);
-          await waitForSerialized(page, 0);
+        await page.waitForSelector(`${editorSelector} button.deleteButton`);
+        await page.click(`${editorSelector} button.deleteButton`);
+        await waitForSerialized(page, 0);
 
-          await page.waitForSelector("#editorUndoBar", { visible: true });
-          await page.click("#editorStampAddImage");
-          const newInput = await page.$("#stampEditorFileInput");
-          await newInput.uploadFile(
-            `${path.join(__dirname, "../images/firefox_logo.png")}`
-          );
-          await waitForImage(page, getEditorSelector(1));
-          await waitForSerialized(page, 1);
-          await page.waitForSelector("#editorUndoBar", { hidden: true });
-        })
-      );
+        await page.waitForSelector("#editorUndoBar", { visible: true });
+        await page.click("#editorStampAddImage");
+        const newInput = await page.$("#stampEditorFileInput");
+        await newInput.uploadFile(
+          `${path.join(__dirname, "../images/firefox_logo.png")}`
+        );
+        await waitForImage(page, getEditorSelector(1));
+        await waitForSerialized(page, 1);
+        await page.waitForSelector("#editorUndoBar", { hidden: true });
+      }
     });
   });
 
@@ -1822,6 +1817,73 @@ describe("Stamp Editor", () => {
           expect(
             await isCanvasMonochrome(page, 1, null, 0xff0000ff)
           ).toBeTrue();
+        })
+      );
+    });
+  });
+
+  describe("Stamp (move between pages)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "firefox_stamp.pdf",
+        getAnnotationSelector("24R"),
+        "50"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must move a stamp annotation from page 1 to page 2", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await waitForPageRendered(page, 1);
+          await waitForPageRendered(page, 2);
+          await waitForAnnotationEditorLayer(page, 1);
+          await waitForAnnotationEditorLayer(page, 2);
+
+          const modeChangedHandle = await waitForAnnotationModeChanged(page);
+
+          await page.click(getAnnotationSelector("24R"), { count: 2 });
+          await awaitPromise(modeChangedHandle);
+
+          const editorSelector = getEditorSelector(0);
+          await waitForSelectedEditor(page, editorSelector);
+
+          await scrollIntoView(
+            page,
+            `.page[data-page-number="2"] .annotationEditorLayer`
+          );
+
+          const editorRect = await getRect(page, editorSelector);
+          const page2Rect = await getRect(
+            page,
+            `.page[data-page-number="2"] .annotationEditorLayer`
+          );
+
+          const deltaX =
+            page2Rect.x +
+            page2Rect.width / 2 -
+            (editorRect.x + editorRect.width / 2);
+          const deltaY =
+            page2Rect.y +
+            page2Rect.height / 3 -
+            (editorRect.y + editorRect.height / 2);
+
+          await dragAndDrop(page, editorSelector, [[deltaX, deltaY]], 10);
+
+          await page.waitForFunction(
+            sel => {
+              const editorDiv = document.querySelector(sel);
+              const pageDiv = editorDiv?.closest(".page");
+              return pageDiv?.getAttribute("data-page-number") === "2";
+            },
+            {},
+            editorSelector
+          );
         })
       );
     });

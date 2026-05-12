@@ -17,19 +17,21 @@ import {
   awaitPromise,
   closePages,
   copy,
+  FSI,
   getEditorSelector,
   getRect,
   loadAndWait,
   paste,
+  PDI,
   switchToEditor,
   waitForPointerUp,
   waitForTimeout,
 } from "./test_utils.mjs";
-
-import { fileURLToPath } from "url";
+import fs from "fs";
 import path from "path";
+import { PNG } from "pngjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 
 const switchToSignature = switchToEditor.bind(null, "Signature");
 
@@ -103,7 +105,7 @@ describe("Signature Editor", () => {
           await page.waitForSelector(
             "#addSignatureSaveContainer > input:not(:disabled)"
           );
-          await page.waitForSelector("#addSignatureSaveCheckbox[checked=true]");
+          await page.waitForSelector("#addSignatureSaveCheckbox:checked");
 
           // The description has been filled in automatically.
           await page.waitForFunction(
@@ -175,8 +177,12 @@ describe("Signature Editor", () => {
           const editorSelector = getEditorSelector(0);
           await page.waitForSelector(editorSelector, { visible: true });
           await page.waitForSelector(
-            `.canvasWrapper > svg use[href="#path_p1_0"]`,
+            `.canvasWrapper > svg use[href="#path_0"]`,
             { visible: true }
+          );
+
+          await page.waitForFunction(
+            `document.getElementById("viewer-alert").textContent === "Signature added"`
           );
 
           // Check the tooltip.
@@ -186,7 +192,7 @@ describe("Signature Editor", () => {
 
           // Check the aria description.
           await page.waitForSelector(
-            `${editorSelector}[aria-description="Signature editor: \u2068Hello World\u2069"]`
+            `${editorSelector}[aria-description="Signature editor: ${FSI}Hello World${PDI}"]`
           );
 
           // Edit the description.
@@ -258,7 +264,7 @@ describe("Signature Editor", () => {
           await page.waitForSelector(
             "#addSignatureSaveContainer > input:not(:disabled)"
           );
-          await page.waitForSelector("#addSignatureSaveCheckbox[checked=true]");
+          await page.waitForSelector("#addSignatureSaveCheckbox:checked");
 
           // The description has been filled in automatically.
           await page.waitForFunction(
@@ -276,7 +282,7 @@ describe("Signature Editor", () => {
           });
 
           await page.waitForSelector(
-            ".canvasWrapper > svg use[href='#path_p1_0']"
+            ".canvasWrapper > svg use[href='#path_0']"
           );
         })
       );
@@ -314,7 +320,7 @@ describe("Signature Editor", () => {
           await page.waitForSelector(
             "#addSignatureSaveContainer > input:not(:disabled)"
           );
-          await page.waitForSelector("#addSignatureSaveCheckbox[checked=true]");
+          await page.waitForSelector("#addSignatureSaveCheckbox:checked");
 
           // The description has been filled in automatically.
           await page.waitForFunction(
@@ -334,7 +340,7 @@ describe("Signature Editor", () => {
           });
 
           await page.waitForSelector(
-            ".canvasWrapper > svg use[href='#path_p1_0']"
+            ".canvasWrapper > svg use[href='#path_0']"
           );
         })
       );
@@ -360,6 +366,9 @@ describe("Signature Editor", () => {
           `${editorSelector} .altText.editDescription`,
           el => el.title
         );
+        const originalL10nParameter = await page.$eval(editorSelector, el =>
+          el.getAttribute("data-l10n-args")
+        );
 
         await copy(page);
         await paste(page);
@@ -371,6 +380,9 @@ describe("Signature Editor", () => {
           `${pastedEditorSelector} .altText.editDescription`,
           el => el.title
         );
+        const pastedL10nParameter = await page.$eval(pastedEditorSelector, el =>
+          el.getAttribute("data-l10n-args")
+        );
 
         expect(pastedRect)
           .withContext(`In ${browserName}`)
@@ -378,6 +390,9 @@ describe("Signature Editor", () => {
         expect(pastedDescription)
           .withContext(`In ${browserName}`)
           .toEqual(originalDescription);
+        expect(pastedL10nParameter)
+          .withContext(`In ${browserName}`)
+          .toEqual(originalL10nParameter);
       }
     });
   });
@@ -412,7 +427,7 @@ describe("Signature Editor", () => {
           const editorSelector = getEditorSelector(0);
           await page.waitForSelector(editorSelector, { visible: true });
           await page.waitForSelector(
-            `.canvasWrapper > svg use[href="#path_p1_0"]`,
+            `.canvasWrapper > svg use[href="#path_0"]`,
             { visible: true }
           );
 
@@ -512,13 +527,13 @@ describe("Signature Editor", () => {
           const editorSelector = getEditorSelector(0);
           await page.waitForSelector(editorSelector, { visible: true });
           await page.waitForSelector(
-            `.canvasWrapper > svg use[href="#path_p1_0"]`,
+            `.canvasWrapper > svg use[href="#path_0"]`,
             { visible: true }
           );
 
           const color = await page.evaluate(() => {
             const use = document.querySelector(
-              `.canvasWrapper > svg use[href="#path_p1_0"]`
+              `.canvasWrapper > svg use[href="#path_0"]`
             );
             return use.parentNode.getAttribute("fill");
           });
@@ -568,17 +583,190 @@ describe("Signature Editor", () => {
           const editorSelector = getEditorSelector(0);
           await page.waitForSelector(editorSelector, { visible: true });
           await page.waitForSelector(
-            `.canvasWrapper > svg use[href="#path_p1_0"]`,
+            `.canvasWrapper > svg use[href="#path_0"]`,
             { visible: true }
           );
 
           const color = await page.evaluate(() => {
             const use = document.querySelector(
-              `.canvasWrapper > svg use[href="#path_p1_0"]`
+              `.canvasWrapper > svg use[href="#path_0"]`
             );
             return use.parentNode.getAttribute("fill");
           });
           expect(color).toEqual("#000000");
+        })
+      );
+    });
+  });
+
+  describe("Check the aspect ratio (bug 1962819)", () => {
+    let pages, contentWidth, contentHeight;
+
+    function getContentAspectRatio(png) {
+      const { width, height } = png;
+      const buffer = new Uint32Array(png.data.buffer);
+      let x0 = width;
+      let y0 = height;
+      let x1 = 0;
+      let y1 = 0;
+      for (let i = 0; i < height; i++) {
+        for (let j = 0; j < width; j++) {
+          if (buffer[width * i + j] !== 0) {
+            x0 = Math.min(x0, j);
+            y0 = Math.min(y0, i);
+            x1 = Math.max(x1, j);
+            y1 = Math.max(y1, i);
+          }
+        }
+      }
+
+      contentWidth = x1 - x0;
+      contentHeight = y1 - y0;
+    }
+
+    beforeAll(() => {
+      const data = fs.readFileSync(
+        path.join(__dirname, "../images/samplesignature.png")
+      );
+      const png = PNG.sync.read(data);
+      getContentAspectRatio(png);
+    });
+
+    beforeEach(async () => {
+      pages = await loadAndWait("empty.pdf", ".annotationEditorLayer");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that the signature has the correct aspect ratio", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await switchToSignature(page);
+          await page.click("#editorSignatureAddSignature");
+
+          await page.waitForSelector("#addSignatureDialog", {
+            visible: true,
+          });
+
+          await page.click("#addSignatureImageButton");
+          await page.waitForSelector("#addSignatureImagePlaceholder", {
+            visible: true,
+          });
+          await page.waitForSelector(`${addButtonSelector}:disabled`);
+
+          const input = await page.$("#addSignatureFilePicker");
+          await input.uploadFile(
+            `${path.join(__dirname, "../images/samplesignature.png")}`
+          );
+          await page.waitForSelector(`#addSignatureImage > path:not([d=""])`);
+
+          // The save button should be enabled now.
+          await page.waitForSelector(
+            "#addSignatureSaveContainer > input:not(:disabled)"
+          );
+          await page.click("#addSignatureAddButton");
+          await page.waitForSelector("#addSignatureDialog", {
+            visible: false,
+          });
+          const { width, height } = await getRect(
+            page,
+            ".canvasWrapper > svg use[href='#path_0']"
+          );
+
+          expect(Math.abs(contentWidth / width - contentHeight / height))
+            .withContext(
+              `In ${browserName} (${contentWidth}x${contentHeight} vs ${width}x${height})`
+            )
+            .toBeLessThan(0.25);
+        })
+      );
+    });
+  });
+
+  describe("Bug 1974257", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("empty.pdf", ".annotationEditorLayer");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that the signature save checkbox is disabled if storage is full", async () => {
+      await Promise.all(
+        pages.map(async ([_, page]) => {
+          await switchToSignature(page);
+
+          for (let i = 0; i < 6; i++) {
+            await page.click("#editorSignatureAddSignature");
+            await page.waitForSelector("#addSignatureDialog", {
+              visible: true,
+            });
+            await page.click("#addSignatureTypeInput");
+            await page.type("#addSignatureTypeInput", `PDF.js ${i}`);
+            if (i === 5) {
+              await page.waitForSelector(
+                "#addSignatureSaveCheckbox:not(checked)"
+              );
+              await page.waitForSelector("#addSignatureSaveCheckbox:disabled");
+            } else {
+              await page.waitForSelector("#addSignatureSaveCheckbox:checked");
+              await page.waitForSelector(
+                "#addSignatureSaveCheckbox:not(:disabled)"
+              );
+            }
+            await page.click("#addSignatureAddButton");
+            await page.waitForSelector("#addSignatureDialog", {
+              visible: false,
+            });
+          }
+        })
+      );
+    });
+  });
+
+  describe("Bug 1975719", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait("empty.pdf", ".annotationEditorLayer");
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that an error is displayed with a monochrome image", async () => {
+      await Promise.all(
+        pages.map(async ([_, page]) => {
+          await switchToSignature(page);
+
+          await page.click("#editorSignatureAddSignature");
+
+          await page.waitForSelector("#addSignatureDialog", {
+            visible: true,
+          });
+          await page.click("#addSignatureImageButton");
+          await page.waitForSelector("#addSignatureImagePlaceholder", {
+            visible: true,
+          });
+          const input = await page.$("#addSignatureFilePicker");
+          await input.uploadFile(
+            `${path.join(__dirname, "../images/red.png")}`
+          );
+          await page.waitForSelector("#addSignatureError", { visible: true });
+          await page.waitForSelector(
+            "#addSignatureErrorTitle[data-l10n-id='pdfjs-editor-add-signature-image-no-data-error-title']"
+          );
+          await page.waitForSelector(
+            "#addSignatureErrorDescription[data-l10n-id='pdfjs-editor-add-signature-image-no-data-error-description']"
+          );
+          await page.click("#addSignatureErrorCloseButton");
+          await page.waitForSelector("#addSignatureError", { visible: false });
         })
       );
     });

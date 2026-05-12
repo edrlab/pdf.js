@@ -33,8 +33,6 @@ import { BaseStream } from "./base_stream.js";
 import { CipherTransformFactory } from "./crypto.js";
 
 class XRef {
-  #firstXRefStmPos = null;
-
   constructor(stream, pdfManager) {
     this.stream = stream;
     this.pdfManager = pdfManager;
@@ -681,11 +679,15 @@ class XRef {
     // When no trailer dictionary candidate exists, try picking the first
     // dictionary that contains a /Root entry (fixes issue18986.pdf).
     if (!trailerDicts.length) {
-      for (const [num, entry] of this.entries.entries()) {
+      // In case, this.entries is a sparse array we don't want to
+      // iterate over empty entries so we use the `in` operator instead of
+      // using for..of on entries() or a for with the array length.
+      for (const num in this.entries) {
+        const entry = this.entries[num];
         if (!entry) {
           continue;
         }
-        const ref = Ref.get(num, entry.gen);
+        const ref = Ref.get(parseInt(num, 10), entry.gen);
         let obj;
 
         try {
@@ -749,7 +751,6 @@ class XRef {
             // (possible infinite recursion)
             this._xrefStms.add(obj);
             this.startXRefQueue.push(obj);
-            this.#firstXRefStmPos ??= obj;
           }
         } else if (Number.isInteger(obj)) {
           // Parse in-stream XRef
@@ -796,13 +797,6 @@ class XRef {
       return undefined;
     }
     throw new XRefParseException();
-  }
-
-  get lastXRefStreamPos() {
-    return (
-      this.#firstXRefStmPos ??
-      (this._xrefStms.size > 0 ? Math.max(...this._xrefStms) : null)
-    );
   }
 
   getEntry(i) {
@@ -961,6 +955,15 @@ class XRef {
         );
       }
       nums[i] = num;
+
+      // The entry in the xref table is the object number followed by the index.
+      // So if index (gen number) is not the same as the index (i), we fix it
+      // (fixes bug 1978317).
+      const entry = this.getEntry(num);
+      if (entry?.offset === tableOffset && entry.gen !== i) {
+        entry.gen = i;
+      }
+
       offsets[i] = offset;
     }
 

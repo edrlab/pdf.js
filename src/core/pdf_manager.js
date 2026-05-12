@@ -22,11 +22,14 @@ import {
 } from "../shared/util.js";
 import { ChunkedStreamManager } from "./chunked_stream.js";
 import { ImageResizer } from "./image_resizer.js";
+import { JBig2CCITTFaxImage } from "./jbig2_ccittFax.js";
 import { JpegStream } from "./jpeg_stream.js";
 import { JpxImage } from "./jpx.js";
 import { MissingDataException } from "./core_utils.js";
 import { OperatorList } from "./operator_list.js";
+import { Pattern } from "./pattern.js";
 import { PDFDocument } from "./document.js";
+import { PDFFunctionFactory } from "./function.js";
 import { Stream } from "./stream.js";
 
 function parseDocBaseUrl(url) {
@@ -70,6 +73,7 @@ class BasePdfManager {
       FeatureTest.isOffscreenCanvasSupported;
     evaluatorOptions.isImageDecoderSupported &&=
       FeatureTest.isImageDecoderSupported;
+
     this.evaluatorOptions = Object.freeze(evaluatorOptions);
 
     // Initialize image-options once per document.
@@ -81,6 +85,9 @@ class BasePdfManager {
     JpxImage.setOptions(options);
     IccColorSpace.setOptions(options);
     CmykICCBasedCS.setOptions(options);
+    JBig2CCITTFaxImage.setOptions(options);
+    PDFFunctionFactory.setOptions(options);
+    Pattern.setOptions(options);
   }
 
   get docId() {
@@ -93,10 +100,6 @@ class BasePdfManager {
 
   get docBaseUrl() {
     return this._docBaseUrl;
-  }
-
-  get catalog() {
-    return this.pdfDocument.catalog;
   }
 
   ensureDoc(prop, args) {
@@ -117,18 +120,6 @@ class BasePdfManager {
 
   fontFallback(id, handler) {
     return this.pdfDocument.fontFallback(id, handler);
-  }
-
-  loadXfaFonts(handler, task) {
-    return this.pdfDocument.loadXfaFonts(handler, task);
-  }
-
-  loadXfaImages() {
-    return this.pdfDocument.loadXfaImages();
-  }
-
-  serializeXfaData(annotationStorage) {
-    return this.pdfDocument.serializeXfaData(annotationStorage);
   }
 
   cleanup(manuallyTriggered = false) {
@@ -205,7 +196,7 @@ class NetworkPdfManager extends BasePdfManager {
     try {
       const value = obj[prop];
       if (typeof value === "function") {
-        return value.apply(obj, args);
+        return await value.apply(obj, args);
       }
       return value;
     } catch (ex) {

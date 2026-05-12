@@ -77,7 +77,7 @@ class Field extends PDFObject {
     this._fillColor = data.fillColor || ["T"];
     this._isChoice = Array.isArray(data.items);
     this._items = data.items || [];
-    this._hasValue = data.hasOwnProperty("value");
+    this._hasValue = Object.hasOwn(data, "value");
     this._page = data.page || 0;
     this._strokeColor = data.strokeColor || ["G", 0];
     this._textColor = data.textColor || ["G", 0];
@@ -86,6 +86,9 @@ class Field extends PDFObject {
     this._fieldType = getFieldType(this._actions);
     this._siblings = data.siblings || null;
     this._rotation = data.rotation || 0;
+    this._datetimeFormat = data.datetimeFormat || null;
+    this._hasDateOrTime = !!data.hasDatetimeHTML;
+    this._util = data.util;
 
     this._globalEval = data.globalEval;
     this._appObjects = data.appObjects;
@@ -246,6 +249,16 @@ class Field extends PDFObject {
       return;
     }
 
+    if (this._hasDateOrTime && value) {
+      const date = this._util.scand(this._datetimeFormat, value);
+      if (date) {
+        this._originalValue = date.valueOf();
+        value = this._util.printd(this._datetimeFormat, date);
+        this._value = !isNaN(value) ? parseFloat(value) : value;
+        return;
+      }
+    }
+
     if (
       value === "" ||
       typeof value !== "string" ||
@@ -260,6 +273,10 @@ class Field extends PDFObject {
     this._originalValue = value;
     const _value = value.trim().replace(",", ".");
     this._value = !isNaN(_value) ? parseFloat(_value) : value;
+  }
+
+  get _initialValue() {
+    return (this._hasDateOrTime && this._originalValue) || null;
   }
 
   _getValue() {
@@ -436,11 +453,9 @@ class Field extends PDFObject {
       return array;
     }
 
-    if (this._children === null) {
-      this._children = this._document.obj._getTerminalChildren(this._fieldPath);
-    }
-
-    return this._children;
+    return (this._children ??= this._document.obj._getTerminalChildren(
+      this._fieldPath
+    ));
   }
 
   getLock() {

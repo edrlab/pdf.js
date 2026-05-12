@@ -13,12 +13,10 @@
  * limitations under the License.
  */
 
+import { RenderableView, RenderingStates } from "./renderable_view.js";
 import { RenderingCancelledException } from "pdfjs-lib";
-import { RenderingStates } from "./ui_utils.js";
 
-class BasePDFPageView {
-  #enableHWA = false;
-
+class BasePDFPageView extends RenderableView {
   #loadingId = null;
 
   #renderError = null;
@@ -27,30 +25,41 @@ class BasePDFPageView {
 
   #showCanvas = null;
 
+  #startTime = 0;
+
+  #tempCanvas = null;
+
   canvas = null;
 
   /** @type {null | HTMLDivElement} */
   div = null;
 
+  enableOptimizedPartialRendering = false;
+
+  imagesRightClickMinSize = -1;
+
   eventBus = null;
 
   id = null;
 
+  imageCoordinates = null;
+
   pageColors = null;
+
+  recordedBBoxes = null;
 
   renderingQueue = null;
 
-  renderTask = null;
-
-  resume = null;
-
   constructor(options) {
-    this.#enableHWA =
-      #enableHWA in options ? options.#enableHWA : options.enableHWA || false;
+    super();
     this.eventBus = options.eventBus;
     this.id = options.id;
     this.pageColors = options.pageColors || null;
     this.renderingQueue = options.renderingQueue;
+    this.enableOptimizedPartialRendering =
+      options.enableOptimizedPartialRendering ?? false;
+    this.imagesRightClickMinSize = options.imagesRightClickMinSize ?? -1;
+    this.minDurationToUpdateCanvas = options.minDurationToUpdateCanvas ?? 500;
   }
 
   get renderingState() {
@@ -71,6 +80,9 @@ class BasePDFPageView {
     switch (state) {
       case RenderingStates.PAUSED:
         this.div.classList.remove("loading");
+        // Display the canvas as it has been drawn.
+        this.#startTime = 0;
+        this.#showCanvas?.(false);
         break;
       case RenderingStates.RUNNING:
         this.div.classList.add("loadingIcon");
@@ -82,10 +94,12 @@ class BasePDFPageView {
           this.div.classList.add("loading");
           this.#loadingId = null;
         }, 0);
+        this.#startTime = Date.now();
         break;
       case RenderingStates.INITIAL:
       case RenderingStates.FINISHED:
         this.div.classList.remove("loadingIcon", "loading");
+        this.#startTime = 0;
         break;
     }
   }
@@ -100,10 +114,41 @@ class BasePDFPageView {
     // have a final flash we just display it once all the drawing is done.
     const updateOnFirstShow = !prevCanvas && !hasHCM && !hideUntilComplete;
 
-    const canvas = (this.canvas = document.createElement("canvas"));
+    let canvas = (this.canvas = document.createElement("canvas"));
 
     this.#showCanvas = isLastShow => {
       if (updateOnFirstShow) {
+        let tempCanvas = this.#tempCanvas;
+        if (!isLastShow && this.minDurationToUpdateCanvas > 0) {
+          // We draw on the canvas at 60fps (in using `requestAnimationFrame`),
+          // so if the canvas is large, updating it at 60fps can be a way too
+          // much and can cause some serious performance issues.
+          // To avoid that we only update the canvas every
+          // `this.#minDurationToUpdateCanvas` ms.
+
+          if (Date.now() - this.#startTime < this.minDurationToUpdateCanvas) {
+            return;
+          }
+          if (!tempCanvas) {
+            tempCanvas = this.#tempCanvas = canvas;
+            canvas = this.canvas = canvas.cloneNode(false);
+            onShow(canvas);
+          }
+        }
+
+        if (tempCanvas) {
+          const ctx = canvas.getContext("2d", {
+            alpha: false,
+          });
+          ctx.drawImage(tempCanvas, 0, 0);
+          if (isLastShow) {
+            this.#resetTempCanvas();
+          } else {
+            this.#startTime = Date.now();
+          }
+          return;
+        }
+
         // Don't add the canvas until the first draw callback, or until
         // drawing is complete when `!this.renderingQueue`, to prevent black
         // flickering.
@@ -123,12 +168,7 @@ class BasePDFPageView {
       }
     };
 
-    const ctx = canvas.getContext("2d", {
-      alpha: false,
-      willReadFrequently: !this.#enableHWA,
-    });
-
-    return { canvas, prevCanvas, ctx };
+    return { canvas, prevCanvas };
   }
 
   #renderContinueCallback = cont => {
@@ -152,6 +192,14 @@ class BasePDFPageView {
     canvas.remove();
     canvas.width = canvas.height = 0;
     this.canvas = null;
+    this.#resetTempCanvas();
+  }
+
+  #resetTempCanvas() {
+    if (this.#tempCanvas) {
+      this.#tempCanvas.width = this.#tempCanvas.height = 0;
+      this.#tempCanvas = null;
+    }
   }
 
   async _drawCanvas(options, onCancel, onFinish) {
@@ -186,6 +234,12 @@ class BasePDFPageView {
       // triggering this callback.
       if (renderTask === this.renderTask) {
         this.renderTask = null;
+        if (this.enableOptimizedPartialRendering) {
+          this.recordedBBoxes ??= renderTask.recordedBBoxes;
+        }
+        if (this.imagesRightClickMinSize !== -1) {
+          this.imageCoordinates ??= this.pdfPage.imageCoordinates;
+        }
       }
     }
     this.renderingState = RenderingStates.FINISHED;

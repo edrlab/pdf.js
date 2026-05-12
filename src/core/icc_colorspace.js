@@ -24,7 +24,7 @@ import {
   qcms_drop_transformer,
   qcms_transformer_from_memory,
 } from "../../external/qcms/qcms.js";
-import { shadow, warn } from "../shared/util.js";
+import { shadow, Util, warn } from "../shared/util.js";
 import { ColorSpace } from "./colorspace.js";
 import { QCMS } from "../../external/qcms/qcms_utils.js";
 
@@ -48,9 +48,7 @@ class IccColorSpace extends ColorSpace {
 
   static #wasmUrl = null;
 
-  static #finalizer = new FinalizationRegistry(transformer => {
-    qcms_drop_transformer(transformer);
-  });
+  static #finalizer = null;
 
   constructor(iccProfile, name, numComps) {
     if (!IccColorSpace.isUsable) {
@@ -63,28 +61,30 @@ class IccColorSpace extends ColorSpace {
     switch (numComps) {
       case 1:
         inType = DataType.Gray8;
-        this.#convertPixel = (src, srcOffset) =>
-          qcms_convert_one(this.#transformer, src[srcOffset] * 255);
+        this.#convertPixel = (src, srcOffset, css) =>
+          qcms_convert_one(this.#transformer, src[srcOffset] * 255, css);
         break;
       case 3:
         inType = DataType.RGB8;
-        this.#convertPixel = (src, srcOffset) =>
+        this.#convertPixel = (src, srcOffset, css) =>
           qcms_convert_three(
             this.#transformer,
             src[srcOffset] * 255,
             src[srcOffset + 1] * 255,
-            src[srcOffset + 2] * 255
+            src[srcOffset + 2] * 255,
+            css
           );
         break;
       case 4:
         inType = DataType.CMYK;
-        this.#convertPixel = (src, srcOffset) =>
+        this.#convertPixel = (src, srcOffset, css) =>
           qcms_convert_four(
             this.#transformer,
             src[srcOffset] * 255,
             src[srcOffset + 1] * 255,
             src[srcOffset + 2] * 255,
-            src[srcOffset + 3] * 255
+            src[srcOffset + 3] * 255,
+            css
           );
         break;
       default:
@@ -98,12 +98,22 @@ class IccColorSpace extends ColorSpace {
     if (!this.#transformer) {
       throw new Error("Failed to create ICC color space");
     }
+    IccColorSpace.#finalizer ||= new FinalizationRegistry(transformer => {
+      qcms_drop_transformer(transformer);
+    });
     IccColorSpace.#finalizer.register(this, this.#transformer);
   }
 
+  getRgbHex(src, srcOffset) {
+    this.#convertPixel(src, srcOffset, /* css */ true);
+    return QCMS._cssColor;
+  }
+
   getRgbItem(src, srcOffset, dest, destOffset) {
-    QCMS._destBuffer = dest.subarray(destOffset, destOffset + 3);
-    this.#convertPixel(src, srcOffset);
+    QCMS._destBuffer = dest;
+    QCMS._destOffset = destOffset;
+    QCMS._destLength = 3;
+    this.#convertPixel(src, srcOffset, /* css */ false);
     QCMS._destBuffer = null;
   }
 
@@ -116,10 +126,9 @@ class IccColorSpace extends ColorSpace {
       }
     }
     QCMS._mustAddAlpha = alpha01 && dest.buffer === src.buffer;
-    QCMS._destBuffer = dest.subarray(
-      destOffset,
-      destOffset + count * (3 + alpha01)
-    );
+    QCMS._destBuffer = dest;
+    QCMS._destOffset = destOffset;
+    QCMS._destLength = count * (3 + alpha01);
     qcms_convert_array(this.#transformer, src);
     QCMS._mustAddAlpha = false;
     QCMS._destBuffer = null;
@@ -143,10 +152,12 @@ class IccColorSpace extends ColorSpace {
     if (this.#useWasm) {
       if (this.#wasmUrl) {
         try {
-          this._module = QCMS._module = initSync({
+          this._module = initSync({
             module: fetchSync(`${this.#wasmUrl}qcms_bg.wasm`),
           });
           isUsable = !!this._module;
+          QCMS._memory = this._module.memory;
+          QCMS._makeHexColor = Util.makeHexColor.bind(Util);
         } catch (e) {
           warn(`ICCBased color space: "${e}".`);
         }

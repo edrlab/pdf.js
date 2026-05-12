@@ -19,7 +19,6 @@ import {
   createValidAbsoluteUrl,
   getModificationDate,
   getUuid,
-  string32,
   stringToBytes,
   stringToPDFString,
 } from "../../src/shared/util.js";
@@ -35,8 +34,8 @@ describe("util", function () {
       }
 
       const exception = new DerivedException("Something went wrong");
-      expect(exception instanceof DerivedException).toEqual(true);
-      expect(exception instanceof BaseException).toEqual(true);
+      expect(exception).toBeInstanceOf(DerivedException);
+      expect(exception).toBeInstanceOf(BaseException);
       expect(exception.message).toEqual("Something went wrong");
       expect(exception.name).toEqual("DerivedException");
       expect(exception.foo).toEqual("bar");
@@ -69,14 +68,6 @@ describe("util", function () {
       const string = "a".repeat(length);
 
       expect(bytesToString(bytes)).toEqual(string);
-    });
-  });
-
-  describe("string32", function () {
-    it("converts unsigned 32-bit integers to strings", function () {
-      expect(string32(0x74727565)).toEqual("true");
-      expect(string32(0x74797031)).toEqual("typ1");
-      expect(string32(0x4f54544f)).toEqual("OTTO");
     });
   });
 
@@ -167,30 +158,6 @@ describe("util", function () {
     });
   });
 
-  describe("ReadableStream", function () {
-    it("should return an Object", function () {
-      const readable = new ReadableStream();
-      expect(typeof readable).toEqual("object");
-    });
-
-    it("should have property getReader", function () {
-      const readable = new ReadableStream();
-      expect(typeof readable.getReader).toEqual("function");
-    });
-  });
-
-  describe("URL", function () {
-    it("should return an Object", function () {
-      const url = new URL("https://example.com");
-      expect(typeof url).toEqual("object");
-    });
-
-    it("should have property `href`", function () {
-      const url = new URL("https://example.com");
-      expect(typeof url.href).toEqual("string");
-    });
-  });
-
   describe("createValidAbsoluteUrl", function () {
     it("handles invalid URLs", function () {
       expect(createValidAbsoluteUrl(undefined, undefined)).toEqual(null);
@@ -247,6 +214,7 @@ describe("util", function () {
     it("should get a correctly formatted date", function () {
       const date = new Date(Date.UTC(3141, 5, 9, 2, 6, 53));
       expect(getModificationDate(date)).toEqual("31410609020653");
+      expect(getModificationDate(date.toString())).toEqual("31410609020653");
     });
   });
 

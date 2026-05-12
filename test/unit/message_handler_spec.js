@@ -17,7 +17,7 @@ import {
   AbortException,
   UnknownErrorException,
 } from "../../src/shared/util.js";
-import { LoopbackPort } from "../../src/display/api.js";
+import { LoopbackPort } from "../../src/display/api_utils.js";
 import { MessageHandler } from "../../src/shared/message_handler.js";
 
 describe("message_handler", function () {
@@ -194,7 +194,7 @@ describe("message_handler", function () {
         expect(false).toEqual(true);
       } catch (reason) {
         expect(log).toEqual("01pe");
-        expect(reason instanceof UnknownErrorException).toEqual(true);
+        expect(reason).toBeInstanceOf(UnknownErrorException);
         expect(reason.message).toEqual("should not read when errored");
       }
     });

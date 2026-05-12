@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-import { fromBase64Util, toBase64Util, warn } from "../../../shared/util.js";
 import { ContourDrawOutline } from "./contour.js";
 import { InkDrawOutline } from "./inkdraw.js";
 import { Outline } from "./outline.js";
+import { warn } from "../../../shared/util.js";
 
 const BASE_HEADER_LENGTH = 8;
 const POINTS_PROPERTIES_NUMBER = 3;
@@ -366,21 +366,12 @@ class SignatureExtractor {
     let max = -Infinity;
     let min = Infinity;
     for (let i = 0, ii = out.length; i < ii; i++) {
-      const A = buf[(i << 2) + 3];
-      if (A === 0) {
-        max = out[i] = 0xff;
-        continue;
-      }
       const pix = (out[i] = buf[i << 2]);
-      if (pix > max) {
-        max = pix;
-      }
-      if (pix < min) {
-        min = pix;
-      }
+      max = Math.max(max, pix);
+      min = Math.min(min, pix);
     }
     const ratio = 255 / (max - min);
-    for (let i = 0; i < N; i++) {
+    for (let i = 0, ii = out.length; i < ii; i++) {
       out[i] = (out[i] - min) * ratio;
     }
 
@@ -436,14 +427,8 @@ class SignatureExtractor {
       const isteps = Math.floor(steps);
       steps = steps === isteps ? isteps - 1 : isteps;
       for (let i = 0; i < steps; i++) {
-        newWidth = prevWidth;
-        newHeight = prevHeight;
-        if (newWidth > maxDim) {
-          newWidth = Math.ceil(newWidth / 2);
-        }
-        if (newHeight > maxDim) {
-          newHeight = Math.ceil(newHeight / 2);
-        }
+        newWidth = Math.ceil(prevWidth / 2);
+        newHeight = Math.ceil(prevHeight / 2);
 
         const offscreen = new OffscreenCanvas(newWidth, newHeight);
         const ctx = offscreen.getContext("2d");
@@ -474,6 +459,8 @@ class SignatureExtractor {
     }
     const offscreen = new OffscreenCanvas(newWidth, newHeight);
     const ctx = offscreen.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, newWidth, newHeight);
     ctx.filter = "grayscale(1)";
     ctx.drawImage(
       bitmap,
@@ -759,15 +746,13 @@ class SignatureExtractor {
 
     writer.close();
 
-    const buf = await new Response(cs.readable).arrayBuffer();
-    const bytes = new Uint8Array(buf);
-
-    return toBase64Util(bytes);
+    const bytes = await new Response(cs.readable).bytes();
+    return bytes.toBase64();
   }
 
   static async decompressSignature(signatureData) {
     try {
-      const bytes = fromBase64Util(signatureData);
+      const bytes = Uint8Array.fromBase64(signatureData);
       const { readable, writable } = new DecompressionStream("deflate-raw");
       const writer = writable.getWriter();
       await writer.ready;
