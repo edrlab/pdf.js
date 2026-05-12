@@ -22,6 +22,13 @@ export class InkEditor extends DrawingEditor {
     static deserializeDraw(pageX: any, pageY: any, pageWidth: any, pageHeight: any, innerMargin: any, data: any): any;
     defaultL10nId: string;
     /** @inheritdoc */
+    get toolbarButtons(): (string | null)[][];
+    get colorType(): number;
+    get colorAndOpacityType(): number;
+    get opacityType(): number;
+    get color(): any;
+    get opacity(): any;
+    /** @inheritdoc */
     createDrawingOptions({ color, thickness, opacity }: {
         color: any;
         thickness: any;

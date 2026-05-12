@@ -1,50 +1,42 @@
 /**
  * Interface that represents PDF data transport. If possible, it allows
  * progressively load entire or fragment of the PDF binary data.
- *
- * @interface
  */
-export class IPDFStream {
+export class BasePDFStream {
+    constructor(source: any, PDFStreamReader: any, PDFStreamRangeReader: any);
+    _fullReader: null;
+    _rangeReaders: Set<any>;
+    _source: null;
+    get _progressiveDataLength(): any;
     /**
      * Gets a reader for the entire PDF data.
-     * @returns {IPDFStreamReader}
+     * @returns {BasePDFStreamReader}
      */
-    getFullReader(): IPDFStreamReader;
+    getFullReader(): BasePDFStreamReader;
     /**
      * Gets a reader for the range of the PDF data.
      *
      * NOTE: Currently this method is only expected to be invoked *after*
-     * the `IPDFStreamReader.prototype.headersReady` promise has resolved.
+     * the `BasePDFStreamReader.prototype.headersReady` promise has resolved.
      *
      * @param {number} begin - the start offset of the data.
      * @param {number} end - the end offset of the data.
-     * @returns {IPDFStreamRangeReader}
+     * @returns {BasePDFStreamRangeReader}
      */
-    getRangeReader(begin: number, end: number): IPDFStreamRangeReader;
+    getRangeReader(begin: number, end: number): BasePDFStreamRangeReader;
     /**
      * Cancels all opened reader and closes all their opened requests.
      * @param {Object} reason - the reason for cancelling
      */
     cancelAllRequests(reason: Object): void;
+    #private;
 }
 /**
  * Interface for a PDF binary data fragment reader.
- *
- * @interface
  */
-export class IPDFStreamRangeReader {
-    /**
-     * Sets or gets the progress callback. The callback can be useful when the
-     * isStreamingSupported property of the object is defined as false.
-     * The callback is called with one parameter: an object with the loaded
-     * property.
-     */
-    onProgress: any;
-    /**
-     * Gets ability of the stream to progressively load binary data.
-     * @type {boolean}
-     */
-    get isStreamingSupported(): boolean;
+export class BasePDFStreamRangeReader {
+    constructor(stream: any, begin: any, end: any);
+    _stream: null;
     /**
      * Requests a chunk of the binary data. The method returns the promise, which
      * is resolved into object with properties "value" and "done". If the done
@@ -62,17 +54,24 @@ export class IPDFStreamRangeReader {
 }
 /**
  * Interface for a PDF binary data reader.
- *
- * @interface
  */
-export class IPDFStreamReader {
+export class BasePDFStreamReader {
+    constructor(stream: any);
     /**
      * Sets or gets the progress callback. The callback can be useful when the
      * isStreamingSupported property of the object is defined as false.
      * The callback is called with one parameter: an object with the loaded and
      * total properties.
      */
-    onProgress: any;
+    onProgress: null;
+    _contentLength: number;
+    _filename: null;
+    _headersCapability: any;
+    _isRangeSupported: boolean;
+    _isStreamingSupported: boolean;
+    _loaded: number;
+    _stream: null;
+    _callOnProgress(): void;
     /**
      * Gets a promise that is resolved when the headers and other metadata of
      * the PDF data stream are available.
