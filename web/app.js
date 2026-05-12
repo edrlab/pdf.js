@@ -2140,6 +2140,25 @@ const PDFViewerApplication = {
         console.error("Unable to get page for thumb view", reason);
       }
 
+      const dispatchThumbnailRendered = () => {
+        eventBus.dispatch("thumbnailrendered", {
+          source: thumbView,
+          pageNumber: thumbView.id,
+          pdfPage: thumbView.pdfPage,
+        });
+      };
+
+      if (thumbView.renderingState === RenderingStates.FINISHED) {
+        for (let i = 0; i < 25 && !thumbView.image?.src; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        if (thumbView.image?.src) {
+          dispatchThumbnailRendered();
+          return;
+        }
+        thumbView.reset();
+      }
+
       await new Promise((resolve) => {
         const eventHandler = ({ source }) => {
           if (source === thumbView) {
@@ -2148,7 +2167,11 @@ const PDFViewerApplication = {
           }
         };
         eventBus._on("thumbnailrendered", eventHandler);
-        this.pdfRenderingQueue.renderView(thumbView);
+        if (!this.pdfRenderingQueue.renderView(thumbView)) {
+          eventBus._off("thumbnailrendered", eventHandler);
+          dispatchThumbnailRendered();
+          resolve();
+        }
       });
 
     };
