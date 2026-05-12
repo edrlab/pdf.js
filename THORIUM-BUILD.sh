@@ -15,6 +15,8 @@ COMMIT_HASH=$(git rev-parse HEAD)
 
 git checkout build
 
+git push && echo "OK" || echo "KO"
+
 git rm -r --cached .
 
 rm -r ./*
@@ -50,3 +52,5 @@ EOF
 git add package.json
 
 git commit --amend -m "build $COMMIT_HASH"
+
+git push && echo "OK" || echo "KO"
