@@ -1,5 +1,5 @@
 
-THORIUM BUILD BRANCH : https://github.com/edrlab/pdf.js/tree/master2
+LATEST THORIUM BUILD BRANCH : https://github.com/edrlab/pdf.js/tree/master3
 
 
 # PDF.js [![Build Status](https://github.com/mozilla/pdf.js/workflows/CI/badge.svg?branch=master)](https://github.com/mozilla/pdf.js/actions?query=workflow%3ACI+branch%3Amaster)
