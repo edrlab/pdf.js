@@ -278,6 +278,8 @@ const PDFViewerApplication = {
 
     this._initializedCapability.settled = true;
     this._initializedCapability.resolve();
+    // THORIUM_BUILD
+    this.eventBus.dispatch("__ready");
   },
 
   /**
@@ -418,16 +420,18 @@ const PDFViewerApplication = {
     const { appConfig, externalServices, l10n, mlManager } = this;
     const abortSignal = this._globalAbortController.signal;
 
-    const eventBus =
-      typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
-        ? new FirefoxEventBus(
-            AppOptions.get("allowedGlobalEvents"),
-            externalServices,
-            AppOptions.get("isInAutomation")
-          )
-        : new EventBus();
+    // THORIUM_BUILD
+    // const eventBus =
+    //   typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")
+    //     ? new FirefoxEventBus(
+    //         AppOptions.get("allowedGlobalEvents"),
+    //         externalServices,
+    //         AppOptions.get("isInAutomation")
+    //       )
+    //     : new EventBus();
+    console.log("PDFJS EVENT BUS FOUND:", !!window.pdfjsEventBus);
+    const eventBus = window.pdfjsEventBus || new EventBus();
     this.eventBus = AppOptions.eventBus = eventBus;
-
     mlManager?.setEventBus(eventBus, abortSignal);
 
     const overlayManager = (this.overlayManager = new OverlayManager());
@@ -1639,12 +1643,12 @@ const PDFViewerApplication = {
       .getMultiple({
         page: null,
         zoom: DEFAULT_SCALE_VALUE,
-        scrollLeft: "0",
-        scrollTop: "0",
+        scrollLeft: 0,
+        scrollTop: 857, // MAX page scroll
         rotation: null,
-        sidebarView: SidebarView.UNKNOWN,
-        scrollMode: ScrollMode.UNKNOWN,
-        spreadMode: SpreadMode.UNKNOWN,
+        sidebarView: SidebarView.NONE,
+        scrollMode: ScrollMode.VERTICAL,
+        spreadMode: SpreadMode.NONE,
       })
       .catch(() => {
         /* Unable to read from storage; ignoring errors. */
@@ -1784,14 +1788,15 @@ const PDFViewerApplication = {
           this.pdfOutlineViewer.render({ outline, pdfDocument });
         });
       }
-      if (this.pdfAttachmentViewer) {
-        pdfDocument.getAttachments().then(attachments => {
-          if (pdfDocument !== this.pdfDocument) {
-            return; // The document was closed while the attachments resolved.
-          }
-          this.pdfAttachmentViewer.render({ attachments });
-        });
-      }
+      // THORIUM_BUILD
+      // if (this.pdfAttachmentViewer) {
+      //   pdfDocument.getAttachments().then(attachments => {
+      //     if (pdfDocument !== this.pdfDocument) {
+      //       return; // The document was closed while the attachments resolved.
+      //     }
+      //     this.pdfAttachmentViewer.render({ attachments });
+      //   });
+      // }
       if (this.pdfLayerViewer) {
         // Ensure that the layers accurately reflects the current state in the
         // viewer itself, rather than the default state provided by the API.
@@ -1806,6 +1811,7 @@ const PDFViewerApplication = {
 
     this._initializePageLabels(pdfDocument);
     this._initializeMetadata(pdfDocument);
+    this.eventBus.dispatch("__pdfdocument", pdfDocument);
   },
 
   /**
@@ -2210,6 +2216,8 @@ const PDFViewerApplication = {
       printContainer: this.appConfig.printContainer,
       printResolution: AppOptions.get("printResolution"),
       printAnnotationStoragePromise: this._printAnnotationStoragePromise,
+      // THORIUM_BUILD
+      printRanges: this._printRanges,
     });
     this.forceRendering();
     // Disable the editor-indicator during printing (fixes bug 1790552).
@@ -2254,11 +2262,17 @@ const PDFViewerApplication = {
   },
 
   requestPresentationMode() {
-    this.pdfPresentationMode?.request();
+    // THORIUM_BUILD
+    // this.pdfPresentationMode?.request();
   },
 
-  async triggerPrinting() {
-    if (this.supportsPrinting && (await this._printPermissionPromise)) {
+  // THORIUM_BUILD
+  triggerPrinting(printRanges) {
+    if (this.supportsPrinting) {
+      this._printRanges = printRanges;
+      console.log(
+        `THORIUM_BUILD startPrinting with printRanges=${this._printRanges}`
+      );
       window.print();
     }
   },
@@ -2277,6 +2291,66 @@ const PDFViewerApplication = {
       pdfViewer,
       preferences,
     } = this;
+    // THORIUM_BUILD
+    const handler = async (pageIndexZeroBased) => {
+      console.log(`THORIUM_BUILD __thumbnailPageRequest=${pageIndexZeroBased}`);
+
+      // reference class PDFThumbnailViewer -> #ensurePdfPageLoaded
+      // https://github.com/edrlab/pdf.js/blob/113d6afdf09dafd1e66c8416e2614e02fd0d2e51/web/pdf_thumbnail_viewer.js#L276
+      const thumbView = this.pdfThumbnailViewer._thumbnails[pageIndexZeroBased];
+      if (!thumbView) {
+        return;
+      }
+      try {
+        if (!thumbView.pdfPage) {
+          const pdfPage = await this.pdfDocument.getPage(thumbView.id);
+          if (!thumbView.pdfPage) {
+            thumbView.setPdfPage(pdfPage);
+          }
+        }
+      } catch (reason) {
+        console.error("Unable to get page for thumb view", reason);
+      }
+
+      const dispatchThumbnailRendered = () => {
+        eventBus.dispatch("thumbnailrendered", {
+          source: thumbView,
+          pageNumber: thumbView.id,
+          pdfPage: thumbView.pdfPage,
+        });
+      };
+
+      if (thumbView.renderingState === RenderingStates.FINISHED) {
+        for (let i = 0; i < 25 && !thumbView.image?.src; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        if (thumbView.image?.src) {
+          dispatchThumbnailRendered();
+          return;
+        }
+        thumbView.reset();
+      }
+
+      await new Promise((resolve) => {
+        const eventHandler = ({ source }) => {
+          if (source === thumbView) {
+            eventBus._off("thumbnailrendered", eventHandler);
+            resolve();
+          }
+        };
+        eventBus._on("thumbnailrendered", eventHandler);
+        if (!this.pdfRenderingQueue.renderView(thumbView)) {
+          eventBus._off("thumbnailrendered", eventHandler);
+          dispatchThumbnailRendered();
+          resolve();
+        }
+      });
+
+    };
+    let handlerPromise = Promise.resolve();
+    eventBus.on("__thumbnailPageRequest", (pageIndexZeroBased) => {
+      handlerPromise = handlerPromise.then(() => handler(pageIndexZeroBased));
+    });
 
     eventBus.on("resize", onResize.bind(this), opts);
     eventBus.on("hashchange", onHashchange.bind(this), opts);
@@ -2307,9 +2381,10 @@ const PDFViewerApplication = {
       opts
     );
     eventBus.on("print", this.triggerPrinting.bind(this), opts);
-    eventBus.on("download", this.downloadOrSave.bind(this), opts);
+    // eventBus.on("download", this.downloadOrSave.bind(this), opts);
     eventBus.on("firstpage", () => (this.page = 1), opts);
     eventBus.on("lastpage", () => (this.page = this.pagesCount), opts);
+    eventBus.on("__setPageLabelOrPageNumber", (page) => (this.pdfLinkService.goToPage(page)), opts);
     eventBus.on("nextpage", () => pdfViewer.nextPage(), opts);
     eventBus.on("previouspage", () => pdfViewer.previousPage(), opts);
     eventBus.on("zoomin", this.zoomIn.bind(this), opts);
@@ -2371,8 +2446,8 @@ const PDFViewerApplication = {
     );
 
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      eventBus.on("fileinputchange", onFileInputChange.bind(this), opts);
-      eventBus.on("openfile", onOpenFile.bind(this), opts);
+      // eventBus.on("fileinputchange", onFileInputChange.bind(this), opts);
+      // eventBus.on("openfile", onOpenFile.bind(this), opts);
     }
     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
       eventBus.on(
@@ -2396,6 +2471,55 @@ const PDFViewerApplication = {
         opts
       );
     }
+
+    // THORIUM_BUILD
+    const pageRenderedExtract = async (ev) => {
+      try {
+        if (ev.pageNumber === 1) {
+          const page = ev.source;
+          if (!page || !page.canvas) {
+            throw Error("PDF PAGE CANVAS??!");
+          }
+
+          // const img = page?.canvas?.toDataURL("image/png");
+          const blob = await new Promise((res, _rej) => {
+            page.canvas.toBlob(
+              (blob) => {
+                res(blob);
+              },
+              "image/png",
+              0.95
+            );
+          });
+          const img = await blob.arrayBuffer();
+
+          const doc = this.pdfDocument;
+          const metadata = await doc.getMetadata();
+          const numberofpages = doc.numPages;
+          const numberOfPagesChecked = typeof numberofpages === "number" ? numberofpages : 0;
+
+          // https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
+          const data = {
+            ...metadata,
+            img,
+            numberofpages: numberOfPagesChecked,
+          };
+
+          // https://www.electronjs.org/docs/api/ipc-renderer#ipcrenderersendchannel-args
+          // const ipc = require('electron').ipcRenderer;
+          const ipc = window.electronIpcRenderer;
+          if (ipc) {
+            ipc.send("pdfjs-extract-data", data);
+          }
+
+          eventBus._off("pagerendered", pageRenderedExtract);
+        }
+      } catch (e) {
+        console.log("ERROR TO EXTRACT COVER AND METADATA FROM PDF");
+        console.log("ERROR", e);
+      }
+    };
+    eventBus.on("pagerendered", pageRenderedExtract);
     eventBus.on("pagesedited", this.onPagesEdited.bind(this), opts);
     eventBus.on("saveextractedpages", this.onSavePages.bind(this), opts);
     eventBus.on("saveandload", this.onSaveAndLoad.bind(this), opts);
@@ -2698,7 +2822,7 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       return;
     }
     const fileOrigin = URL.parse(file, window.location)?.origin;
-    if (fileOrigin === viewerOrigin) {
+    if (fileOrigin === viewerOrigin || fileOrigin === "null") {
       return;
     }
     const ex = new Error("file origin does not match viewer's");

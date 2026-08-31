@@ -356,15 +356,21 @@ body {
 #viewerContainer {
   overflow: auto;
   position: absolute;
-  inset: var(--toolbar-height) 0 0;
+  inset: 0 0 0 0;
   outline: none;
   z-index: 0;
 }
 
-#viewerContainer:not(.pdfPresentationMode) {
+/* THORIUM_BUILD */
+/* #viewerContainer:not(.pdfPresentationMode) {
   transition-duration: var(--sidebar-transition-duration);
   transition-timing-function: var(--sidebar-transition-timing-function);
 }
+
+#outerContainer.sidebarOpen #viewerContainer:not(.pdfPresentationMode) {
+  inset-inline-start: var(--sidebar-width);
+  transition-property: inset-inline-start;
+} */
 
 /*#if MOZCENTRAL*/
 #viewerContainer:not(.pdfPresentationMode) {

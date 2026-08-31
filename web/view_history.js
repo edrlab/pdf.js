@@ -25,28 +25,28 @@ const DEFAULT_VIEW_HISTORY_CACHE_SIZE = 20;
  *  - GENERIC or CHROME - uses localStorage, if it is available.
  */
 class ViewHistory {
-  constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
-    this._initializedPromise = this._readFromStorage().then(databaseStr => {
-      const database = JSON.parse(databaseStr || "{}");
-      let index = -1;
-      if (!Array.isArray(database.files)) {
-        database.files = [];
-      } else {
-        while (database.files.length >= cacheSize) {
-          database.files.shift();
-        }
+  // constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
+  //   this._initializedPromise = this._readFromStorage().then(databaseStr => {
+  //     const database = JSON.parse(databaseStr || "{}");
+  //     let index = -1;
+  //     if (!Array.isArray(database.files)) {
+  //       database.files = [];
+  //     } else {
+  //       while (database.files.length >= cacheSize) {
+  //         database.files.shift();
+  //       }
 
-        index = database.files.findIndex(
-          branch => branch.fingerprint === fingerprint
-        );
-      }
-      if (index === -1) {
-        index = database.files.push({ fingerprint }) - 1;
-      }
-      this.file = database.files[index];
-      this.database = database;
-    });
-  }
+  //       index = database.files.findIndex(
+  //         branch => branch.fingerprint === fingerprint
+  //       );
+  //     }
+  //     if (index === -1) {
+  //       index = database.files.push({ fingerprint }) - 1;
+  //     }
+  //     this.file = database.files[index];
+  //     this.database = database;
+  //   });
+  // }
 
   async _writeToStorage() {
     const databaseStr = JSON.stringify(this.database);
@@ -94,6 +94,32 @@ class ViewHistory {
       values[name] = val !== undefined ? val : properties[name];
     }
     return values;
+  }
+}
+
+
+class ViewHistory extends ViewHistory_ {
+  constructor(_fingerprint) {
+    super();
+
+    this.file = this._readFromStorage();
+    this._initializedPromise = Promise.resolve();
+  }
+  _writeToStorage() {
+    if (window.pdfjsEventBus) {
+      window.pdfjsEventBus.dispatch("__savePreferences", this.file)
+    }
+  }
+  _readFromStorage() {
+
+    try {
+      const b64dataURIEncoded = window.location.search.split("&thoriumpdfdata=")[1];
+      const b64dataURIDecoded = decodeURIComponent(b64dataURIEncoded);
+      const data = JSON.parse(atob(b64dataURIDecoded));
+      return data;
+    } catch {
+      return { page: 1 };
+    }
   }
 }
 

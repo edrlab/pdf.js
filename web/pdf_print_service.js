@@ -84,6 +84,8 @@ class PDFPrintService {
     printContainer,
     printResolution,
     printAnnotationStoragePromise = null,
+    // THORIUM_BUILD
+    printRanges = [],
   }) {
     this.pdfDocument = pdfDocument;
     this.pagesOverview = pagesOverview;
@@ -97,6 +99,8 @@ class PDFPrintService {
     this.currentPage = -1;
     // The temporary canvas where renderPage paints one page at a time.
     this.scratchCanvas = document.createElement("canvas");
+    // THORIUM_BUILD
+    this.printRanges = printRanges;
   }
 
   layout() {
@@ -176,20 +180,25 @@ class PDFPrintService {
       }
       const index = this.currentPage;
       renderProgress(index, pageCount);
-      renderPage(
-        this,
-        this.pdfDocument,
-        /* pageNumber = */ index + 1,
-        this.pagesOverview[index],
-        this._printResolution,
-        this._optionalContentConfigPromise,
-        this._printAnnotationStoragePromise
-      )
-        .then(this.useRenderedPage.bind(this))
-        .then(function () {
-          renderNextPage(resolve, reject);
-        }, reject);
-    };
+      // THORIUM_BUILD
+      const pageNumber = index + 1;
+      let p = Promise.resolve();
+      if (!this.printRanges || this.printRanges.length === 0 || this.printRanges.includes(pageNumber)) {
+        p = renderPage(
+          this,
+          this.pdfDocument,
+          pageNumber,
+          this.pagesOverview[index],
+          this._printResolution,
+          this._optionalContentConfigPromise,
+          this._printAnnotationStoragePromise
+        )
+          .then(this.useRenderedPage.bind(this));
+      }
+      p.then(function () {
+        renderNextPage(resolve, reject);
+      }, reject);
+    }
     return new Promise(renderNextPage);
   }
 
@@ -335,7 +344,8 @@ window.addEventListener(
       !event.altKey &&
       (!event.shiftKey || window.chrome || window.opera)
     ) {
-      window.print();
+      // THORIUM_BUILD disable CMD/CTRL + P shortcut
+      // window.print();
 
       event.preventDefault();
       event.stopImmediatePropagation();
