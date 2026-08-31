@@ -8,20 +8,17 @@ https://github.com/mozilla/pdf.js/compare/v6.3.289...edrlab:pdf.js:v6.3.289_BRAN
 Below is a MacOS Apple Container script that uses an ephemeral Linux NodeJS Docker image with a PWD/CWD filesystem mount, to install the NPM package dependencies locally inside the `node_modules` folder (with a "global" cache inside the `.flox/` Flox/Nix folder), and to run the `npm run build` Gulp commands that generate "web" and "types" artefacts inside the git-ignored `build/` folder:
 
 ```
-set -xv ; container --version ; container system stop ; container system start ; container system status ; container stop test-container ; container rm --force test-container ; container prune ; container list --all ; container run --cpus 10 --memory 12g --platform linux/arm64 --name test-container --volume ${PWD}:/MOUNT -w /MOUNT registry.access.redhat.com/hi/nodejs:latest sh -c 'set -xv ; node --version ; npm --version ; echo $PATH ; env ; export NPM_CONFIG_PREFIX=/MOUNT/.flox/NPM_PREFIX ; export NPM_CONFIG_CACHE=/MOUNT/.flox/NPM_CACHE ; export NODE_PATH=/MOUNT/.flox/NPM_PREFIX/lib/node_modules ; npm install --global npm ; npm install --global sfw ; ls -als /usr/local/lib/node_modules || (ls -als /MOUNT/.flox/NPM_CACHE ; ls -als /MOUNT/.flox/NPM_PREFIX/bin ; ls -als /MOUNT/.flox/NPM_PREFIX/lib/node_modules) ; export PATH="/MOUNT/.flox/NPM_PREFIX/bin:/usr/local/bin:$PATH" ; echo $PATH ; echo $NODE_PATH ; npm --version ; npm config get cache ; npm config get prefix ; rm -f package-lock.json ; sfw npm install --ignore-scripts --foreground-scripts --min-release-age=3 --allow-git=root ; npm run build' ; container list --all ; container stop test-container ; container rm --force test-container ; container prune ; container system status ; container system stop ; set +xv
+set -xv ; container --version ; container system stop ; container system start ; container system status ; container stop test-container ; container rm --force test-container ; container prune ; container list --all ; container run --cpus 10 --memory 12g --platform linux/arm64 --name test-container --volume ${PWD}:/MOUNT -w /MOUNT registry.access.redhat.com/hi/nodejs:latest sh -c 'set -xv ; node --version ; npm --version ; echo $PATH ; env ; export NPM_CONFIG_PREFIX=/MOUNT/.flox/NPM_PREFIX ; export NPM_CONFIG_CACHE=/MOUNT/.flox/NPM_CACHE ; export NODE_PATH=/MOUNT/.flox/NPM_PREFIX/lib/node_modules ; npm install --global npm ; npm cache clean --force ; npm install --global sfw ; ls -als /usr/local/lib/node_modules || (ls -als /MOUNT/.flox/NPM_CACHE ; ls -als /MOUNT/.flox/NPM_PREFIX/bin ; ls -als /MOUNT/.flox/NPM_PREFIX/lib/node_modules) ; export PATH="/MOUNT/.flox/NPM_PREFIX/bin:/usr/local/bin:$PATH" ; echo $PATH ; echo $NODE_PATH ; npm --version ; npm config get cache ; npm config get prefix ; rm -f package-lock.json ; rm -rf node_modules ; sfw npm install --ignore-scripts --foreground-scripts --min-release-age=3 --allow-git=root ; rm -rf build ; npm run build' ; container list --all ; container stop test-container ; container rm --force test-container ; container prune ; container system status ; container system stop ; set +xv
 ```
 
 ...so assuming `v5.7.284` is the original PDF.js release tag, `v5.7.284_BRANCH` is a branch created at this tag git commit hash, and `v5.7.284_BRANCH_modified` is where we apply our stack of changes (git merge of all our commits so far) ... we can now create a dedicated "build" branch (let's name it `v5.7.284_BUILD`):
 
+* `COMMIT_HASH=$(git rev-parse HEAD)`
+* `git checkout --orphan v5.7.284_BUILD || git checkout v5.7.284_BUILD` (`--orphan` for a totally new branch, otherwise without if already exists)
+* `git rm -r --cached .`
+* `git add build/gh-pages/build build/gh-pages/web build/types -f`
+* Multiline:
 ```
-COMMIT_HASH=$(git rev-parse HEAD)
-
-git checkout --orphan v5.7.284_BUILD
-
-git rm -r --cached .
-
-git add build/gh-pages/build build/gh-pages/web build/types -f
-
 cat << EOF > package.json
 {
   "name": "pdf.js",
@@ -40,17 +37,12 @@ cat << EOF > package.json
   "license": "Apache-2.0"
 }
 EOF
-
-git add package.json
-
-git commit -m "PDF.js v5.7.284-build.$COMMIT_HASH"
-
-git push --set-upstream origin v5.7.284_BUILD
-
-git checkout v5.7.284_BRANCH_modified -f
-
-git prune
 ```
+* `git add package.json`
+* `git commit -a -m "PDF.js v5.7.284-build.$COMMIT_HASH"`
+* `git push --set-upstream origin v5.7.284_BUILD`
+* `git checkout v5.7.284_BRANCH_modified -f`
+* `git prune`
 
 ________________________________________________________________________________________________________________________________________________
 ________________________________________________________________________________________________________________________________________________
