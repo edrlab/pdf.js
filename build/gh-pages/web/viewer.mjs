@@ -941,7 +941,7 @@ const {
 } = globalThis.pdfjsLib;
 
 ;// ./web/internal_evt.js
-const INTERNAL_EVT = "897e02f2-c750-4158-9815-b272ed15654e";
+const INTERNAL_EVT = "c870bacf-7e40-46ac-baad-f921d7724be5";
 const internalOpt = Object.freeze({
   internal: INTERNAL_EVT
 });
