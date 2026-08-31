@@ -2334,13 +2334,13 @@ const PDFViewerApplication = {
       await new Promise((resolve) => {
         const eventHandler = ({ source }) => {
           if (source === thumbView) {
-            eventBus._off("thumbnailrendered", eventHandler);
+            eventBus.off("thumbnailrendered", eventHandler);
             resolve();
           }
         };
-        eventBus._on("thumbnailrendered", eventHandler);
+        eventBus.on("thumbnailrendered", eventHandler);
         if (!this.pdfRenderingQueue.renderView(thumbView)) {
-          eventBus._off("thumbnailrendered", eventHandler);
+          eventBus.off("thumbnailrendered", eventHandler);
           dispatchThumbnailRendered();
           resolve();
         }
@@ -2512,7 +2512,7 @@ const PDFViewerApplication = {
             ipc.send("pdfjs-extract-data", data);
           }
 
-          eventBus._off("pagerendered", pageRenderedExtract);
+          eventBus.off("pagerendered", pageRenderedExtract);
         }
       } catch (e) {
         console.log("ERROR TO EXTRACT COVER AND METADATA FROM PDF");
