@@ -13,15 +13,12 @@ set -xv ; container --version ; container system stop ; container system start ;
 
 ...so assuming `v6.3.289` is the original PDF.js release tag, `v6.3.289_BRANCH` is a branch created at this tag git commit hash, and `v6.3.289_BRANCH_modified` is where we apply our stack of changes (git merge of all our commits so far) ... we can now create a dedicated "build" branch (let's name it `v6.3.289_BUILD`):
 
+* `COMMIT_HASH=$(git rev-parse HEAD)`
+* `git checkout --orphan v6.3.289_BUILD || git checkout v6.3.289_BUILD` (`--orphan` for a totally new branch, otherwise without if already exists)
+* `git rm -r --cached .`
+* `git add build/gh-pages/build build/gh-pages/web build/types -f`
+* Multiline:
 ```
-COMMIT_HASH=$(git rev-parse HEAD)
-
-git checkout --orphan v6.3.289_BUILD
-
-git rm -r --cached .
-
-git add build/gh-pages/build build/gh-pages/web build/types -f
-
 cat << EOF > package.json
 {
   "name": "pdf.js",
@@ -40,17 +37,12 @@ cat << EOF > package.json
   "license": "Apache-2.0"
 }
 EOF
-
-git add package.json
-
-git commit -m "PDF.js v6.3.289-build.$COMMIT_HASH"
-
-git push --set-upstream origin v6.3.289_BUILD
-
-git checkout v6.3.289_BRANCH_modified -f
-
-git prune
 ```
+* `git add package.json`
+* `git commit -a -m "PDF.js v6.3.289-build.$COMMIT_HASH"`
+* `git push --set-upstream origin v6.3.289_BUILD`
+* `git checkout v6.3.289_BRANCH_modified -f`
+* `git prune`
 
 ________________________________________________________________________________________________________________________________________________
 ________________________________________________________________________________________________________________________________________________
