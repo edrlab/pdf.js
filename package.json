@@ -1,6 +1,6 @@
 {
   "name": "pdf.js",
-  "version": "v6.3.289-build.24c396cf9654cbd0c2a2a93c9a40e3a59c1acf43",
+  "version": "v6.3.289-build.5fb319ebea310d6389bec3f1b0791f0914ea1051",
   "type": "module",
   "types": "build/types/src/pdf.d.ts",
   "repository": {

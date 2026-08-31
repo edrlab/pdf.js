@@ -941,7 +941,7 @@ const {
 } = globalThis.pdfjsLib;
 
 ;// ./web/internal_evt.js
-const INTERNAL_EVT = "5fb94e22-e319-44f2-8505-845bf42a120f";
+const INTERNAL_EVT = "897e02f2-c750-4158-9815-b272ed15654e";
 const internalOpt = Object.freeze({
   internal: INTERNAL_EVT
 });
@@ -20230,13 +20230,13 @@ const PDFViewerApplication = {
           source
         }) => {
           if (source === thumbView) {
-            eventBus._off("thumbnailrendered", eventHandler);
+            eventBus.off("thumbnailrendered", eventHandler);
             resolve();
           }
         };
-        eventBus._on("thumbnailrendered", eventHandler);
+        eventBus.on("thumbnailrendered", eventHandler);
         if (!this.pdfRenderingQueue.renderView(thumbView)) {
-          eventBus._off("thumbnailrendered", eventHandler);
+          eventBus.off("thumbnailrendered", eventHandler);
           dispatchThumbnailRendered();
           resolve();
         }
@@ -20311,7 +20311,7 @@ const PDFViewerApplication = {
           if (ipc) {
             ipc.send("pdfjs-extract-data", data);
           }
-          eventBus._off("pagerendered", pageRenderedExtract);
+          eventBus.off("pagerendered", pageRenderedExtract);
         }
       } catch (e) {
         console.log("ERROR TO EXTRACT COVER AND METADATA FROM PDF");
