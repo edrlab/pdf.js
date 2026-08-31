@@ -24,7 +24,7 @@ const DEFAULT_VIEW_HISTORY_CACHE_SIZE = 20;
  *  - MOZCENTRAL        - uses sessionStorage.
  *  - GENERIC or CHROME - uses localStorage, if it is available.
  */
-class ViewHistory {
+class ViewHistory_ {
   // constructor(fingerprint, cacheSize = DEFAULT_VIEW_HISTORY_CACHE_SIZE) {
   //   this._initializedPromise = this._readFromStorage().then(databaseStr => {
   //     const database = JSON.parse(databaseStr || "{}");
@@ -48,22 +48,22 @@ class ViewHistory {
   //   });
   // }
 
-  async _writeToStorage() {
-    const databaseStr = JSON.stringify(this.database);
+  // async _writeToStorage() {
+  //   const databaseStr = JSON.stringify(this.database);
 
-    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
-      sessionStorage.setItem("pdfjs.history", databaseStr);
-      return;
-    }
-    localStorage.setItem("pdfjs.history", databaseStr);
-  }
+  //   if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+  //     sessionStorage.setItem("pdfjs.history", databaseStr);
+  //     return;
+  //   }
+  //   localStorage.setItem("pdfjs.history", databaseStr);
+  // }
 
-  async _readFromStorage() {
-    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
-      return sessionStorage.getItem("pdfjs.history");
-    }
-    return localStorage.getItem("pdfjs.history");
-  }
+  // async _readFromStorage() {
+  //   if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+  //     return sessionStorage.getItem("pdfjs.history");
+  //   }
+  //   return localStorage.getItem("pdfjs.history");
+  // }
 
   async set(name, val) {
     await this._initializedPromise;
